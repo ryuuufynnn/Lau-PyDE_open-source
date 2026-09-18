@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QkeySequence, QtextCursor
+from PySide6.QtGui import QAction, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
@@ -358,7 +358,7 @@ class MainWindow(QMainWindow):
     def _focus_terminal(self) -> None:
         self._bottom_tabs.setCurrentWidget(self.terminal_panel)
 
-    # ---- Misc -----------------------------------------------------------------
+    # misc
 
     def _on_modification_changed(self, _modified: bool) -> None:
         self._update_title()

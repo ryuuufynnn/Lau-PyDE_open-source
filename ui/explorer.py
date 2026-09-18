@@ -28,7 +28,7 @@ class FileExplorer(QWidget):
     file_double_clicked = Signal(str)
 
     def __init__(self):
-        def super().__init__()
+        super().__init__()
 
         self._model = QFileSystemModel()
         self._model.setNameFilters(["*.py", "*.txt", "*.md", "*.json", "*.cfg", "*.toml"])
@@ -46,7 +46,7 @@ class FileExplorer(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._tree)
-        
+
     def set_root_folder(self, folder_path: str) -> None:
         """Point the explorer at a new project folder."""
         root_index = self._model.setRootPath(folder_path)
