@@ -46,8 +46,6 @@ class PythonRunner(QObject):
         """Stop the currently running process, if any."""
         if self.is_running():
             self._process.kill()
-            self._process.waitForFinished(1000)
-        self._process = None
 
     def write_input(self, text: str) -> None:
         if text and self.is_running():
