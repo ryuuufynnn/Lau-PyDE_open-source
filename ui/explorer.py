@@ -12,7 +12,15 @@ and nothing outside the opened folder is ever touched.
 from pathlib import Path
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFileSystemModel, QTreeView, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFileSystemModel,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTreeView,
+    QVBoxLayout,
+    QWidget,
+)
 
 class FileExplorer(QWidget):
     """
@@ -26,6 +34,8 @@ class FileExplorer(QWidget):
     """
 
     file_double_clicked = Signal(str)
+    minimize_requested = Signal()
+    maximize_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -43,8 +53,26 @@ class FileExplorer(QWidget):
 
         self._tree.doubleClicked.connect(self._on_double_clicked)
 
+        title_bar = QWidget()
+        title_layout = QHBoxLayout(title_bar)
+        title_layout.setContentsMargins(4, 4, 4, 0)
+        title_layout.addWidget(QLabel("Explorer"))
+        title_layout.addStretch()
+
+        minimize_button = QPushButton("—")
+        maximize_button = QPushButton("□")
+        minimize_button.setToolTip("Minimize explorer")
+        maximize_button.setToolTip("Maximize or restore explorer")
+        minimize_button.setFixedWidth(32)
+        maximize_button.setFixedWidth(32)
+        minimize_button.clicked.connect(self.minimize_requested)
+        maximize_button.clicked.connect(self.maximize_requested)
+        title_layout.addWidget(minimize_button)
+        title_layout.addWidget(maximize_button)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(title_bar)
         layout.addWidget(self._tree)
 
     def set_root_folder(self, folder_path: str) -> None:
