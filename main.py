@@ -9,7 +9,7 @@ def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)
 
-    window = MainWindow
+    window = MainWindow()
     window.show()
 
     sys.exit(app.exec())

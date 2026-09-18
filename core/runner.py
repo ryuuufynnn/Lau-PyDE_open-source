@@ -46,6 +46,12 @@ class PythonRunner(QObject):
         """Stop the currently running process, if any."""
         if self.is_running():
             self._process.kill()
+            self._process.waitForFinished(1000)
+        self._process = None
+
+    def write_input(self, text: str) -> None:
+        if text and self.is_running():
+            self._process.write(text.encode())
 
     def is_running(self) -> bool:
         return self._process is not None and self._process.state() != QProcess.NotRunning
@@ -57,3 +63,4 @@ class PythonRunner(QObject):
 
     def _handle_finished(self, exit_code: int, _exit_status) -> None:
         self.finished.emit(exit_code)
+        self._process = None

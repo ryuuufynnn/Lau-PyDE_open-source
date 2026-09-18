@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLineEdit 
 from PySide6.QtGui import QAction, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -10,6 +11,8 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QSplitter,
     QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from core.file_manager import read_file, write_file
@@ -107,15 +110,32 @@ class MainWindow(QMainWindow):
         self.output_panel = QPlainTextEdit()
         self.output_panel.setReadOnly(True)
 
+        self.input_box = QLineEdit()
+        self.input_box.setPlaceholderText("Enter input...")
+        self.input_box.returnPressed.connect(self.send_input)
+
         self.terminal_panel = TerminalPanel()
 
         self._runner = PythonRunner()
         self._runner.output_ready.connect(self._append_output)
         self._runner.finished.connect(self._on_run_finished)
 
+    def send_input(self):
+        text = self.input_box.text()
+        if not text:
+            return
+        self._runner.write_input(text + "\n")
+        self.input_box.clear()
+
     def _build_layout(self) -> None:
+        output_container = QWidget()
+        output_layout = QVBoxLayout(output_container)
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.addWidget(self.output_panel)
+        output_layout.addWidget(self.input_box)
+
         bottom_tabs = QTabWidget()
-        bottom_tabs.addTab(self.output_panel, "Output")
+        bottom_tabs.addTab(output_container, "Output")
         bottom_tabs.addTab(self.terminal_panel, "Terminal")
         self._bottom_tabs = bottom_tabs
 
