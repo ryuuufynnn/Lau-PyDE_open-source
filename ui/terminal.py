@@ -2,7 +2,15 @@ from pathlib import Path
 
 from PySide6.QtCore import QProcess
 from PySide6.QtGui import QFont, QTextCursor
-from PySide6.QtWidgets import QLineEdit, QPlainTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class TerminalPanel(QWidget):
@@ -23,12 +31,32 @@ class TerminalPanel(QWidget):
         self._input.setPlaceholderText("Type a command and press Enter (e.g. python --version)")
         self._input.returnPressed.connect(self._run_command)
 
+        title_bar = QWidget()
+        title_bar_layout = QHBoxLayout(title_bar)
+        title_bar_layout.setContentsMargins(0, 0, 0, 0)
+        title_bar_layout.addWidget(QLabel("Terminal"))
+        title_bar_layout.addStretch()
+
+        minimize_button = QPushButton("—")
+        maximize_button = QPushButton("□")
+        minimize_button.setToolTip("Minimize terminal")
+        maximize_button.setToolTip("Maximize terminal")
+        minimize_button.setFixedWidth(32)
+        maximize_button.setFixedWidth(32)
+        minimize_button.clicked.connect(self._minimize_terminal)
+        maximize_button.clicked.connect(self._maximize_terminal)
+        title_bar_layout.addWidget(minimize_button)
+        title_bar_layout.addWidget(maximize_button)
+        self.setStyleSheet("QPushButton { min-height: 24px; }")
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.addWidget(title_bar)
         layout.addWidget(self._output)
         layout.addWidget(self._input)
 
         self._process = None
+        self._is_minimized = False
 
     def set_working_directory(self, folder_path: str) -> None:
         self._working_dir = folder_path
@@ -54,6 +82,23 @@ class TerminalPanel(QWidget):
         # Running through the system shell (bash) means pipes, quotes,
         # and things like `pip --version` behave as the user expects.
         self._process.start("bash", ["-c", command])
+
+    def _minimize_terminal(self) -> None:
+        if self._is_minimized:
+            self._output.setVisible(True)
+            self._input.setVisible(True)
+            self._is_minimized = False
+            return
+
+        self._output.setVisible(False)
+        self._input.setVisible(False)
+        self._is_minimized = True
+
+    def _maximize_terminal(self) -> None:
+        self._output.setVisible(True)
+        self._input.setVisible(True)
+        self._is_minimized = False
+        self._input.setFocus()
 
     def _handle_output(self) -> None:
         data = self._process.readAllStandardOutput()

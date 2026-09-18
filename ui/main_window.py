@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLineEdit 
 from PySide6.QtGui import QAction, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -19,6 +18,7 @@ from core.file_manager import read_file, write_file
 from core.runner import PythonRunner
 from ui.editor import CodeEditor
 from ui.explorer import FileExplorer
+from ui.inline_output import InlineInputOutput
 from ui.terminal import TerminalPanel
 
 APP_NAME = "Lau-PyDE"
@@ -107,12 +107,10 @@ class MainWindow(QMainWindow):
         self.explorer = FileExplorer()
         self.explorer.file_double_clicked.connect(self.open_file)
 
-        self.output_panel = QPlainTextEdit()
-        self.output_panel.setReadOnly(True)
-
-        self.input_box = QLineEdit()
-        self.input_box.setPlaceholderText("Enter input...")
-        self.input_box.returnPressed.connect(self.send_input)
+        self.output_panel = InlineInputOutput()
+        self.output_panel.input_submitted.connect(self.send_input)
+        self._active_prompt = ""
+        self._output_line_tail = ""
 
         self.terminal_panel = TerminalPanel()
 
@@ -120,24 +118,24 @@ class MainWindow(QMainWindow):
         self._runner.output_ready.connect(self._append_output)
         self._runner.finished.connect(self._on_run_finished)
 
-    def send_input(self):
-        text = self.input_box.text()
-        if not text:
+    def send_input(self, text: str) -> None:
+        if not self._runner.is_running():
             return
         self._runner.write_input(text + "\n")
-        self.input_box.clear()
+        self.output_panel.stop_input()
+        self._active_prompt = ""
 
     def _build_layout(self) -> None:
         output_container = QWidget()
         output_layout = QVBoxLayout(output_container)
         output_layout.setContentsMargins(0, 0, 0, 0)
         output_layout.addWidget(self.output_panel)
-        output_layout.addWidget(self.input_box)
 
         bottom_tabs = QTabWidget()
         bottom_tabs.addTab(output_container, "Output")
         bottom_tabs.addTab(self.terminal_panel, "Terminal")
         self._bottom_tabs = bottom_tabs
+        self._output_container = output_container
 
         # vertical splitter: editor on top, Output/Terminal tabs below.
         editor_and_output = QSplitter(Qt.Vertical)
@@ -360,8 +358,10 @@ class MainWindow(QMainWindow):
 
         working_dir = self._current_folder or str(Path(self._current_file_path).parent)
 
+        self._output_line_tail = ""
         self.output_panel.clear()
-        self._bottom_tabs.setCurrentWidget(self.output_panel)
+        self.output_panel.stop_input()
+        self._bottom_tabs.setCurrentWidget(self._output_container)
         self._append_output(f"Running {self._current_file_path}\n\n")
 
         self._runner.run_file(self._current_file_path, working_dir)
@@ -371,7 +371,27 @@ class MainWindow(QMainWindow):
         self.output_panel.moveCursor(QTextCursor.End)
         self.output_panel.insertPlainText(text)
 
+        # Keep the unfinished line so a prompt split across process output
+        # chunks (for example, "Enter your" + " name: ") is still detected.
+        self._output_line_tail = (self._output_line_tail + text).rsplit("\n", 1)[-1]
+
+        if not text or self._runner is None or not self._runner.is_running():
+            return
+
+        last_line = self._output_line_tail.rstrip()
+        if not last_line:
+            return
+
+        prompt = last_line.strip()
+        if prompt.endswith(":") or prompt.endswith("?") or prompt.endswith(">"):
+            if prompt != self._active_prompt:
+                self._active_prompt = prompt
+                self.output_panel.start_input()
+
     def _on_run_finished(self, exit_code: int) -> None:
+        self._active_prompt = ""
+        self._output_line_tail = ""
+        self.output_panel.stop_input()
         self._append_output(f"\nProcess finished with exit code {exit_code}.\n")
         self.statusBar().showMessage("Ready")
 
