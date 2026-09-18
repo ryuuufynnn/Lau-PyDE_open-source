@@ -1,35 +1,28 @@
 from pathlib import Path
 
-from PySide6.QtCore import QProcess
+from PySide6.QtCore import QProcess, Signal
 from PySide6.QtGui import QFont, QTextCursor
-from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QPlainTextEdit,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+from ui.inline_output import InlineInputOutput
 
 
 class TerminalPanel(QWidget):
-    """A minimal command runner: an output area plus a command input box."""
+    """A command runner whose editable command line lives in the terminal."""
+
+    minimize_requested = Signal()
+    maximize_requested = Signal()
 
     def __init__(self):
         super().__init__()
 
         self._working_dir = str(Path.home())
 
-        self._output = QPlainTextEdit()
-        self._output.setReadOnly(True)
+        self._output = InlineInputOutput()
         font = QFont("Consolas")
         font.setStyleHint(QFont.Monospace)
         self._output.setFont(font)
-
-        self._input = QLineEdit()
-        self._input.setPlaceholderText("Type a command and press Enter (e.g. python --version)")
-        self._input.returnPressed.connect(self._run_command)
+        self._output.input_submitted.connect(self._run_command)
 
         title_bar = QWidget()
         title_bar_layout = QHBoxLayout(title_bar)
@@ -37,14 +30,20 @@ class TerminalPanel(QWidget):
         title_bar_layout.addWidget(QLabel("Terminal"))
         title_bar_layout.addStretch()
 
+        self._stop_button = QPushButton("Stop")
+        self._stop_button.setToolTip("Stop the running terminal command")
+        self._stop_button.setEnabled(False)
+        self._stop_button.clicked.connect(self.stop)
+
         minimize_button = QPushButton("—")
         maximize_button = QPushButton("□")
         minimize_button.setToolTip("Minimize terminal")
-        maximize_button.setToolTip("Maximize terminal")
+        maximize_button.setToolTip("Maximize or restore terminal")
         minimize_button.setFixedWidth(32)
         maximize_button.setFixedWidth(32)
-        minimize_button.clicked.connect(self._minimize_terminal)
-        maximize_button.clicked.connect(self._maximize_terminal)
+        minimize_button.clicked.connect(self.minimize_requested)
+        maximize_button.clicked.connect(self.maximize_requested)
+        title_bar_layout.addWidget(self._stop_button)
         title_bar_layout.addWidget(minimize_button)
         title_bar_layout.addWidget(maximize_button)
         self.setStyleSheet("QPushButton { min-height: 24px; }")
@@ -53,23 +52,25 @@ class TerminalPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(title_bar)
         layout.addWidget(self._output)
-        layout.addWidget(self._input)
 
         self._process = None
-        self._is_minimized = False
+        self._show_prompt()
 
     def set_working_directory(self, folder_path: str) -> None:
         self._working_dir = folder_path
 
-    def _run_command(self) -> None:
-        command = self._input.text().strip()
+    def _run_command(self, command: str) -> None:
+        command = command.strip()
+        self._output.stop_input()
+        self._output.moveCursor(QTextCursor.End)
+        self._output.insertPlainText("\n")
         if not command:
+            self._show_prompt()
             return
-        self._input.clear()
-        self._output.appendPlainText(f"$ {command}")
 
         if self._process is not None and self._process.state() != QProcess.NotRunning:
             self._output.appendPlainText("(A command is already running, please wait.)")
+            self._show_prompt()
             return
 
         self._process = QProcess()
@@ -78,27 +79,23 @@ class TerminalPanel(QWidget):
         self._process.setProcessChannelMode(QProcess.MergedChannels)
         self._process.readyReadStandardOutput.connect(self._handle_output)
         self._process.finished.connect(self._handle_finished)
+        self._stop_button.setEnabled(True)
 
         # Running through the system shell (bash) means pipes, quotes,
         # and things like `pip --version` behave as the user expects.
         self._process.start("bash", ["-c", command])
 
-    def _minimize_terminal(self) -> None:
-        if self._is_minimized:
-            self._output.setVisible(True)
-            self._input.setVisible(True)
-            self._is_minimized = False
-            return
+    def stop(self) -> None:
+        """Kill the current shell command, if one is still running."""
+        if self._process is not None and self._process.state() != QProcess.NotRunning:
+            self._process.kill()
 
-        self._output.setVisible(False)
-        self._input.setVisible(False)
-        self._is_minimized = True
-
-    def _maximize_terminal(self) -> None:
-        self._output.setVisible(True)
-        self._input.setVisible(True)
-        self._is_minimized = False
-        self._input.setFocus()
+    def focus_input(self) -> None:
+        """Focus the current inline terminal prompt."""
+        self._output.setFocus()
+        cursor = self._output.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self._output.setTextCursor(cursor)
 
     def _handle_output(self) -> None:
         data = self._process.readAllStandardOutput()
@@ -108,3 +105,11 @@ class TerminalPanel(QWidget):
 
     def _handle_finished(self, _exit_code: int, _exit_status) -> None:
         self._output.appendPlainText("")
+        self._process = None
+        self._stop_button.setEnabled(False)
+        self._show_prompt()
+
+    def _show_prompt(self) -> None:
+        self._output.moveCursor(QTextCursor.End)
+        self._output.insertPlainText("$ ")
+        self._output.start_input()
