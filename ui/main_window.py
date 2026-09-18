@@ -5,9 +5,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
+    QHBoxLayout,
+    QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QPushButton,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -89,6 +92,9 @@ class MainWindow(QMainWindow):
         # directory when running a file).
         self._current_file_path: Optional[str] = None
         self._current_folder: Optional[str] = None
+        self._maximized_pane: Optional[str] = None
+        self._explorer_minimized = False
+        self._bottom_minimized = False
 
         self.resize(1200, 800)
 
@@ -113,6 +119,13 @@ class MainWindow(QMainWindow):
         self._output_line_tail = ""
 
         self.terminal_panel = TerminalPanel()
+        self.terminal_panel.minimize_requested.connect(self._minimize_bottom_panel)
+        self.terminal_panel.maximize_requested.connect(
+            lambda: self._maximize_pane("terminal")
+        )
+
+        self.explorer.minimize_requested.connect(self._minimize_explorer)
+        self.explorer.maximize_requested.connect(lambda: self._maximize_pane("explorer"))
 
         self._runner = PythonRunner()
         self._runner.output_ready.connect(self._append_output)
@@ -128,7 +141,32 @@ class MainWindow(QMainWindow):
     def _build_layout(self) -> None:
         output_container = QWidget()
         output_layout = QVBoxLayout(output_container)
-        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.setContentsMargins(4, 4, 4, 4)
+
+        output_title = QWidget()
+        output_title_layout = QHBoxLayout(output_title)
+        output_title_layout.setContentsMargins(0, 0, 0, 0)
+        output_title_layout.addWidget(QLabel("Output"))
+        output_title_layout.addStretch()
+
+        self._stop_running_button = QPushButton("Stop")
+        self._stop_running_button.setToolTip("Stop the running Python program")
+        self._stop_running_button.setEnabled(False)
+        self._stop_running_button.clicked.connect(self.stop_running)
+        output_title_layout.addWidget(self._stop_running_button)
+
+        output_minimize_button = QPushButton("—")
+        output_maximize_button = QPushButton("□")
+        output_minimize_button.setToolTip("Minimize output and terminal")
+        output_maximize_button.setToolTip("Maximize or restore output")
+        output_minimize_button.setFixedWidth(32)
+        output_maximize_button.setFixedWidth(32)
+        output_minimize_button.clicked.connect(self._minimize_bottom_panel)
+        output_maximize_button.clicked.connect(lambda: self._maximize_pane("output"))
+        output_title_layout.addWidget(output_minimize_button)
+        output_title_layout.addWidget(output_maximize_button)
+
+        output_layout.addWidget(output_title)
         output_layout.addWidget(self.output_panel)
 
         bottom_tabs = QTabWidget()
@@ -143,6 +181,7 @@ class MainWindow(QMainWindow):
         editor_and_output.addWidget(bottom_tabs)
         editor_and_output.setStretchFactor(0, 3)
         editor_and_output.setStretchFactor(1, 1)
+        self._editor_and_output = editor_and_output
 
         # horizontal splitter: explorer sidebar on the left, everything
         # else on the right. QSplitter lets the user drag to resize.
@@ -152,6 +191,7 @@ class MainWindow(QMainWindow):
         main_splitter.setStretchFactor(0, 0)
         main_splitter.setStretchFactor(1, 1)
         main_splitter.setSizes([220, 980])
+        self._main_splitter = main_splitter
 
         self.setCentralWidget(main_splitter)
 
@@ -245,6 +285,31 @@ class MainWindow(QMainWindow):
         run_action.setShortcut(QKeySequence("Ctrl+R"))
         run_action.triggered.connect(self.run_file)
         run_menu.addAction(run_action)
+
+        self._stop_running_action = QAction("Stop Running", self)
+        self._stop_running_action.setShortcut(QKeySequence("Ctrl+."))
+        self._stop_running_action.setEnabled(False)
+        self._stop_running_action.triggered.connect(self.stop_running)
+        run_menu.addAction(self._stop_running_action)
+
+        # --- View menu ---
+        view_menu = menu_bar.addMenu("&View")
+
+        show_explorer_action = QAction("Show Explorer", self)
+        show_explorer_action.triggered.connect(self._show_explorer)
+        view_menu.addAction(show_explorer_action)
+
+        show_output_action = QAction("Show Output", self)
+        show_output_action.triggered.connect(lambda: self._show_bottom_panel("output"))
+        view_menu.addAction(show_output_action)
+
+        show_terminal_action = QAction("Show Terminal", self)
+        show_terminal_action.triggered.connect(lambda: self._show_bottom_panel("terminal"))
+        view_menu.addAction(show_terminal_action)
+
+        restore_layout_action = QAction("Restore Layout", self)
+        restore_layout_action.triggered.connect(self._restore_layout)
+        view_menu.addAction(restore_layout_action)
 
         # --- Terminal menu ---
         terminal_menu = menu_bar.addMenu("&Terminal")
@@ -361,11 +426,27 @@ class MainWindow(QMainWindow):
         self._output_line_tail = ""
         self.output_panel.clear()
         self.output_panel.stop_input()
-        self._bottom_tabs.setCurrentWidget(self._output_container)
+        self._show_bottom_panel("output")
         self._append_output(f"Running {self._current_file_path}\n\n")
 
         self._runner.run_file(self._current_file_path, working_dir)
+        self._set_running_controls(True)
         self.statusBar().showMessage("Running...")
+
+    def stop_running(self) -> None:
+        """Kill the program currently being run from the editor."""
+        if not self._runner.is_running():
+            return
+
+        self.output_panel.stop_input()
+        self._active_prompt = ""
+        self._runner.stop()
+        self._append_output("\nStopping process...\n")
+        self.statusBar().showMessage("Stopping...")
+
+    def _set_running_controls(self, running: bool) -> None:
+        self._stop_running_button.setEnabled(running)
+        self._stop_running_action.setEnabled(running)
 
     def _append_output(self, text: str) -> None:
         self.output_panel.moveCursor(QTextCursor.End)
@@ -393,10 +474,81 @@ class MainWindow(QMainWindow):
         self._output_line_tail = ""
         self.output_panel.stop_input()
         self._append_output(f"\nProcess finished with exit code {exit_code}.\n")
+        self._set_running_controls(False)
         self.statusBar().showMessage("Ready")
 
+    # ---- Pane layout ------------------------------------------------------
+
+    def _minimize_bottom_panel(self) -> None:
+        self._restore_layout()
+        self._bottom_minimized = True
+        self._bottom_tabs.hide()
+        self.statusBar().showMessage("Output and terminal minimized. Use View to show them.")
+
+    def _minimize_explorer(self) -> None:
+        self._restore_layout()
+        self._explorer_minimized = True
+        self.explorer.hide()
+        self.statusBar().showMessage("Explorer minimized. Use View to show it.")
+
+    def _maximize_pane(self, pane: str) -> None:
+        if self._maximized_pane == pane:
+            self._restore_layout()
+            return
+
+        if pane == "explorer":
+            self._explorer_minimized = False
+        else:
+            self._bottom_minimized = False
+
+        self._restore_layout()
+        self._maximized_pane = pane
+        self._bottom_tabs.tabBar().hide()
+
+        if pane == "explorer":
+            self.explorer.show()
+            self._editor_and_output.hide()
+            self._main_splitter.setSizes([self.width(), 0])
+        else:
+            self.explorer.hide()
+            self.editor.hide()
+            self._bottom_tabs.show()
+            self._bottom_tabs.setCurrentWidget(
+                self._output_container if pane == "output" else self.terminal_panel
+            )
+            self._editor_and_output.setSizes([0, self.height()])
+            self._main_splitter.setSizes([0, self.width()])
+            if pane == "terminal":
+                self.terminal_panel.focus_input()
+
+    def _restore_layout(self) -> None:
+        self._maximized_pane = None
+        self._editor_and_output.show()
+        self.editor.show()
+        self.explorer.setVisible(not self._explorer_minimized)
+        self._bottom_tabs.setVisible(not self._bottom_minimized)
+        self._bottom_tabs.tabBar().show()
+        self._main_splitter.setSizes([220, max(1, self.width() - 220)])
+        if not self._bottom_minimized:
+            self._editor_and_output.setSizes([max(1, self.height() - 260), 260])
+
+    def _show_explorer(self) -> None:
+        self._restore_layout()
+        self._explorer_minimized = False
+        self.explorer.show()
+
+    def _show_bottom_panel(self, pane: str) -> None:
+        self._restore_layout()
+        self._bottom_minimized = False
+        self._bottom_tabs.show()
+        self._bottom_tabs.setCurrentWidget(
+            self._output_container if pane == "output" else self.terminal_panel
+        )
+        if pane == "terminal":
+            self.terminal_panel.focus_input()
+
     def _focus_terminal(self) -> None:
-        self._bottom_tabs.setCurrentWidget(self.terminal_panel)
+        self._show_bottom_panel("terminal")
 
     # misc
 
