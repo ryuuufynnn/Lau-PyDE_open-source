@@ -84,4 +84,3 @@ class FileExplorer(QWidget):
         path = self._model.filePath(index)
         if Path(path).is_file():
             self.file_double_clicked.emit(path)
-

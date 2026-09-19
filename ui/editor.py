@@ -246,14 +246,6 @@ class CodeEditor(QPlainTextEdit):
             block_number += 1
 
     def _highlight_current_line(self) -> None:
-        # """Give the line the cursor is on a subtle background highlight."""
-        # selection = QTextEdit.ExtraSelection()
-        # selection.format.setBackground(QColor("#2a2d2e"))
-        # selection.format.setProperty(QTextFormat.FullWidthSelection, True)
-        # selection.cursor = self.textCursor()
-        # selection.cursor.clearSelection()
-        # self.setExtraSelections([selection])
-
         """highlight the current line and any syntax error line."""
 
         selections = []
@@ -268,8 +260,7 @@ class CodeEditor(QPlainTextEdit):
 
         selections.append(current_selection)
 
-        # syntax error liine
-    
+        # syntax error line
         if self._error_line is not None:
             block = self.document().findBlockByLineNumber(self._error_line - 1)
 

@@ -7,6 +7,8 @@ from PySide6.QtWidgets import QApplication
 
 from ui.main_window import DARK_STYLESHEET, MainWindow
 
+PENGUIN_NAME = "naughty_frog"
+
 def main():
     app = QApplication(sys.argv)
     BASE_DIR = Path(__file__).resolve().parent

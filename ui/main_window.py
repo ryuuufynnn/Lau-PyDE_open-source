@@ -140,7 +140,6 @@ class MainWindow(QMainWindow):
             return
             
         # self.output_panel.insertPlainText(text)
-        
         self.output_panel.stop_input()
         self._active_prompt = ""
 
@@ -483,7 +482,7 @@ class MainWindow(QMainWindow):
         self.output_panel.moveCursor(QTextCursor.End)
         self.output_panel.insertPlainText(text)
 
-        # Keep the unfinished line so a prompt split across process output
+        # keep the unfinished line so a prompt split across process output
         # chunks (for example, "Enter your" + " name: ") is still detected.
         self._output_line_tail = (self._output_line_tail + text).rsplit("\n", 1)[-1]
 

@@ -4,7 +4,6 @@ from PySide6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
 
-
 app = QApplication.instance() or QApplication(sys.argv)
 
 

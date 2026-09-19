@@ -2,7 +2,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit
 
-
 class InlineInputOutput(QPlainTextEdit):
     """Output view that accepts one answer directly after a program prompt."""
 

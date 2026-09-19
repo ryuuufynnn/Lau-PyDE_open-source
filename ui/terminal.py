@@ -86,7 +86,7 @@ class TerminalPanel(QWidget):
         self._process.finished.connect(self._handle_finished)
         self._stop_button.setEnabled(True)
 
-        # Running through the system shell (bash) means pipes, quotes,
+        # running through the system shell (bash) means pipes, quotes,
         # and things like `pip --version` behave as the user expects.
         self._process.start("bash", ["-c", command])
 
