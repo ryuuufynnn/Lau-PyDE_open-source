@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QStackedWidget,
 )
 
 from core.file_manager import read_file, write_file
@@ -113,6 +114,76 @@ class MainWindow(QMainWindow):
         self.editor = CodeEditor()
         self.editor.document().modificationChanged.connect(self._on_modification_changed)
 
+        # starting code for the welcome message
+        # Welcome screen
+        self._editor_stack = QStackedWidget()
+
+        self._welcome_widget = QWidget()
+        welcome_layout = QVBoxLayout(self._welcome_widget)
+        welcome_layout.setAlignment(Qt.AlignCenter)
+        welcome_layout.setSpacing(8)
+
+        # Title
+        welcome_title = QLabel("Welcome to Lau-PyDE")
+        welcome_title.setAlignment(Qt.AlignCenter)
+        welcome_title.setStyleSheet(
+            "font-size: 24px;"
+            "font-weight: bold;"
+        )
+
+        # Subtitle
+        welcome_subtitle = QLabel(
+            "A simple and lightweight Python Development Environment"
+        )
+        welcome_subtitle.setAlignment(Qt.AlignCenter)
+        welcome_subtitle.setStyleSheet(
+            "font-size: 12px;"
+        )
+
+        # Get Started title
+        welcome_get_started_title = QLabel("Get Started with these commands")
+        welcome_get_started_title.setAlignment(Qt.AlignCenter)
+        welcome_get_started_title.setStyleSheet(
+            "font-size: 14px;"
+            "font-weight: bold;"
+        )
+
+        # Commands
+        welcome_new_file = QLabel("Ctrl+N    |    New File")
+        welcome_open_file = QLabel("Ctrl+O    |    Open File")
+        welcome_open_folder = QLabel("Ctrl+L    |    Open Folder")
+
+        for label in (
+            welcome_new_file,
+            welcome_open_file,
+            welcome_open_folder,
+        ):
+            label.setAlignment(Qt.AlignCenter)
+            label.setStyleSheet("font-size: 13px;")
+
+        # Ending message
+        welcome_footer = QLabel("Enjoy using Lau-PyDE. Happy coding!")
+        welcome_footer.setAlignment(Qt.AlignCenter)
+        welcome_footer.setStyleSheet("font-size: 13px;")
+
+        # Add everything
+        welcome_layout.addWidget(welcome_title)
+        welcome_layout.addWidget(welcome_subtitle)
+
+        welcome_layout.addSpacing(24)
+
+        welcome_layout.addWidget(welcome_get_started_title)
+        welcome_layout.addWidget(welcome_new_file)
+        welcome_layout.addWidget(welcome_open_file)
+        welcome_layout.addWidget(welcome_open_folder)
+
+        welcome_layout.addSpacing(24)
+
+        welcome_layout.addWidget(welcome_footer)
+        self._editor_stack.addWidget(self._welcome_widget)
+        self._editor_stack.addWidget(self.editor)
+        self._editor_stack.setCurrentWidget(self._welcome_widget)
+
         # self.explorer = FileExplorer()
         # self.load_recent_project()
         # self.explorer.file_double_clicked.connect(self.open_file)
@@ -189,7 +260,7 @@ class MainWindow(QMainWindow):
 
         # vertical splitter: editor on top, Output/Terminal tabs below.
         editor_and_output = QSplitter(Qt.Vertical)
-        editor_and_output.addWidget(self.editor)
+        editor_and_output.addWidget(self._editor_stack) # pinalitan ko from self.editor to self.editor_stack
         editor_and_output.addWidget(bottom_tabs)
         editor_and_output.setStretchFactor(0, 3)
         editor_and_output.setStretchFactor(1, 1)
@@ -297,7 +368,7 @@ class MainWindow(QMainWindow):
         select_all_action.triggered.connect(self.editor.selectAll)
         edit_menu.addAction(select_all_action)
 
-        # --- Run menu ---
+        # run menu
         run_menu = menu_bar.addMenu("&Run")
 
         run_action = QAction("Run File", self)
@@ -341,7 +412,9 @@ class MainWindow(QMainWindow):
     def new_file(self) -> None:
         if not self._confirm_discard_changes():
             return
+
         self.editor.clear()
+        self._show_editor()
         self._current_file_path = None
         self.editor.document().setModified(False)
         self._update_title()
@@ -366,6 +439,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, APP_NAME, f"Could not open file:\n{path}\n\n{error}")
             return
 
+        self._show_editor()
         self.editor.setPlainText(content)
         self._current_file_path = path
         self.editor.document().setModified(False)
@@ -389,14 +463,14 @@ class MainWindow(QMainWindow):
                 json.dumps({"project": folder})
             )
             self.statusBar().showMessage(f"Workspace: {folder}")
+        self._show_editor()
 
     def close_project(self) -> None:
         """Close the current project workspace."""
         self._current_folder = None
         self._current_file_path = None
 
-        self.editor.clear()
-        self.explorer.hide()
+        
 
         # remove the current project folder from the IDE and set to None
         self.explorer.set_root_folder(None)
@@ -406,6 +480,10 @@ class MainWindow(QMainWindow):
                 RECENT_PROJECT_FILE.unlink()
             except OSError:
                 pass
+
+        self._show_welcome()
+        self.editor.clear()
+        self.explorer.hide()
 
         self._update_title()
         self.statusBar().showMessage("Project closed")
@@ -595,6 +673,13 @@ class MainWindow(QMainWindow):
         self._restore_layout()
         self._explorer_minimized = False
         self.explorer.show()
+
+    # shwow welcome message method
+    def _show_welcome(self) -> None:
+       self._editor_stack.setCurrentWidget(self._welcome_widget)   
+
+    def _show_editor(self) -> None:
+        self._editor_stack.setCurrentWidget(self.editor)
 
     def _show_bottom_panel(self, pane: str) -> None:
         self._restore_layout()
