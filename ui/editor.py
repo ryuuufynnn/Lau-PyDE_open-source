@@ -298,8 +298,44 @@ class CodeEditor(QPlainTextEdit):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             self._handle_auto_indent()
             return
+
+        if event.key() == Qt.Key_Backspace:
+            if self._handle_backspace():
+                return
+        
         super().keyPressEvent(event)
 
+    def _handle_backspace(self) -> bool:
+        cursor = self.textCursor()
+
+        if cursor.hasSelection():
+            return False
+
+        position = cursor.positionInBlock()
+        line = cursor.block().text()
+
+        # only handle backspace inside indentation shish
+        if position == 0:
+            return False
+
+        before_cursor = line[:position]
+
+        if not before_cursor.isspace():
+            return False
+
+        spaces = 3
+
+        # remove up to one indentation level.
+        remove_count = min(position, spaces)
+
+        cursor.deletePreviousChar()
+
+        for _ in range(remove_count):
+            cursor.deletePreviousChar()
+
+        self.setTextCursor(cursor)
+
+        return True
     def _handle_auto_indent(self) -> None:
         """
         When the user presses Enter, keep the same indentation as the

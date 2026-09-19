@@ -224,6 +224,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(open_action)
 
         open_folder_action = QAction("Open Folder...", self)
+        open_folder_action.setShortcut(QKeySequence("Ctrl+L"))
         open_folder_action.triggered.connect(self.open_folder_dialog)
         file_menu.addAction(open_folder_action)
 
@@ -243,6 +244,7 @@ class MainWindow(QMainWindow):
 
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
+        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
         file_menu.addAction(exit_action)
 
         # edit menu
@@ -315,7 +317,7 @@ class MainWindow(QMainWindow):
         restore_layout_action.triggered.connect(self._restore_layout)
         view_menu.addAction(restore_layout_action)
 
-        # --- Terminal menu ---
+        # termnal layout
         terminal_menu = menu_bar.addMenu("&Terminal")
 
         focus_terminal_action = QAction("Focus Terminal", self)
@@ -477,12 +479,11 @@ class MainWindow(QMainWindow):
         self._active_prompt = ""
         self._output_line_tail = ""
         self.output_panel.stop_input()
-        self._append_output(f"\nProcess finished with exit code {exit_code}.\n")
+        self._append_output(f"\nProcess finished with exit code {exit_code}. Thank You for using Lau-PyDE!\n")
         self._set_running_controls(False)
         self.statusBar().showMessage("Ready")
 
-    # ---- Pane layout ------------------------------------------------------
-
+    # pane layout
     def _minimize_bottom_panel(self) -> None:
         self._restore_layout()
         self._bottom_minimized = True
