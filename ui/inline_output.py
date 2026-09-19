@@ -23,6 +23,11 @@ class InlineInputOutput(QPlainTextEdit):
         self.setFocus(Qt.OtherFocusReason)
 
     def stop_input(self) -> None:
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText("\n")
+        self.setTextCursor(cursor)
+
         self._input_start = None
         self.setReadOnly(True)
 

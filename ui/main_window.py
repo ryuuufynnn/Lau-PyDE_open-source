@@ -134,9 +134,13 @@ class MainWindow(QMainWindow):
     def send_input(self, text: str) -> None:
         if not self._runner.is_running():
             return
-        self._runner.write_input(text + "\n")
+            
+        # self.output_panel.insertPlainText(text)
+        
         self.output_panel.stop_input()
         self._active_prompt = ""
+
+        self._runner.write_input(text + "\n")
 
     def _build_layout(self) -> None:
         output_container = QWidget()
