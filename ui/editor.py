@@ -1,4 +1,5 @@
 import ast
+import difflib
 from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt
 from PySide6.QtGui import (
     QColor,
@@ -7,6 +8,7 @@ from PySide6.QtGui import (
     QSyntaxHighlighter,
     QTextCharFormat,
     QTextFormat,
+    QTextCursor,
 )
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
 
@@ -133,6 +135,9 @@ class CodeEditor(QPlainTextEdit):
         font.setPointSize(11)
         self.setFont(font)
 
+        self._error_line = None
+        self._name_errors = []
+
         # Code editors traditionally scroll sideways rather than wrap.
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(" "))
@@ -149,20 +154,44 @@ class CodeEditor(QPlainTextEdit):
         self._update_line_number_area_width(0)
         self._highlight_current_line()
 
-        self._error_line = None
         self._highlighter = PythonHighlighter(self.document())
         self.textChanged.connect(self._check_errors)
 
     def _check_errors(self) -> None:
         code = self.toPlainText()
+        
         self._error_line = None
+        self._name_errors = []
 
         try:
-            ast.parse(code)
+            tree = ast.parse(code)
         except SyntaxError as error:
             self._error_line = error.lineno
+            self._highlight_current_line()
+        else:
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Name):
+                    continue
 
-        self._highlight_current_line()
+                if node.id in PYTHON_BUILTINS:
+                    continue
+
+                matches = difflib.get_close_matches(
+                    node.id,
+                    PYTHON_BUILTINS,
+                    n=1,
+                    cutoff=0.75,
+                )
+
+                if matches:
+                    self._name_errors.append(
+                        (
+                            node.lineno,
+                            node.col_offset,
+                            node.end_col_offset,
+                        )
+                    )
+            self._highlight_current_line()
 
     # line number gutter
     def line_number_area_width(self) -> int:
@@ -209,16 +238,62 @@ class CodeEditor(QPlainTextEdit):
             block_number += 1
 
     def _highlight_current_line(self) -> None:
-        """Give the line the cursor is on a subtle background highlight."""
-        selection = QTextEdit.ExtraSelection()
-        selection.format.setBackground(QColor("#2a2d2e"))
-        selection.format.setProperty(QTextFormat.FullWidthSelection, True)
-        selection.cursor = self.textCursor()
-        selection.cursor.clearSelection()
-        self.setExtraSelections([selection])
+        # """Give the line the cursor is on a subtle background highlight."""
+        # selection = QTextEdit.ExtraSelection()
+        # selection.format.setBackground(QColor("#2a2d2e"))
+        # selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+        # selection.cursor = self.textCursor()
+        # selection.cursor.clearSelection()
+        # self.setExtraSelections([selection])
+
+        """highlight the current line and any syntax error line."""
+
+        selections = []
+
+        current_selection = QTextEdit.ExtraSelection()
+
+        current_selection.format.setBackground(QColor("#2a2d2e"))
+        current_selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+
+        current_selection.cursor = self.textCursor()
+        current_selection.cursor.clearSelection()
+
+        selections.append(current_selection)
+
+        # syntax error liine
+    
+        if self._error_line is not None:
+            block = self.document().findBlockByLineNumber(self._error_line - 1)
+
+            if block.isValid():
+                error_selection = QTextEdit.ExtraSelection()
+                error_selection.format.setBackground(QColor("#cb0000"))
+                error_selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+                error_selection.cursor = QTextCursor(block)
+
+                selections.append(error_selection)
+
+            for line, start, end in self._name_errors:
+                block = self.document().findBlockByLineNumber(line - 1)
+
+                if block.isValid():
+                    error_selection = QTextEdit.ExtraSelection()
+                    error_selection.format.setUnderlineColor(QColor("#f44747"))
+                    error_selection.format.setUnderlineStyle(QTextCharFormat.SpellCheckUnderline)
+
+                    cursor = QTextCursor(block)
+                    cursor.setPosition(block.position() + start)
+                    cursor.setPosition(
+                        block.position() + end,
+                        QTextCursor.KeepAnchor,
+                    )
+
+                    error_selection.cursor = cursor
+                    selections.append(error_selection)
+
+        self.setExtraSelections(selections)
 
     # auto indentation
-
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             self._handle_auto_indent()
