@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, Signal
-from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ui.inline_output import InlineInputOutput
@@ -63,7 +63,7 @@ class TerminalPanel(QWidget):
         command = command.strip()
         self._output.stop_input()
         self._output.moveCursor(QTextCursor.End)
-        self._output.insertPlainText("\n")
+        # self._output.insertPlainText("\n")
         if not command:
             self._show_prompt()
             return
@@ -109,7 +109,28 @@ class TerminalPanel(QWidget):
         self._stop_button.setEnabled(False)
         self._show_prompt()
 
+    # def colors(self):
+    #     # ANSI escape codes for colors
+    #     RED = "\033[91m"
+    #     GREEN = "\033[92m"
+    #     YELLOW = "\033[93m"
+    #     BLUE = "\033[94m"
+    #     MAGENTA = "\033[95m"
+    #     CYAN = "\033[96m"
+    #     RESET = "\033[0m"
+
+    #     return RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, RESET
+
+
     def _show_prompt(self) -> None:
-        self._output.moveCursor(QTextCursor.End)
-        self._output.insertPlainText("$ ")
+        current_path = Path.cwd()
+        cursor = self._output.textCursor()
+        green_format = QTextCharFormat()
+        green_format.setForeground(QColor("#00ff00"))
+
+        cursor.setCharFormat(green_format)
+        cursor.insertText(f"{current_path}\n")
+        cursor.insertText("$ ")
+
+        self._output.setTextCursor(cursor)
         self._output.start_input()

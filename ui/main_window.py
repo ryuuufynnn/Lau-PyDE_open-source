@@ -370,7 +370,7 @@ class MainWindow(QMainWindow):
         if folder:
             # self._current_folder = folder
             # # self.explorer.set_root_folder(folder)
-            # self.terminal_panel.set_working_directory(folder)
+            self.terminal_panel.set_working_directory(folder)
             # self.statusBar().showMessage(f"Workspace: {folder}")
             self._current_folder = folder
             self.explorer.set_root_folder(folder)

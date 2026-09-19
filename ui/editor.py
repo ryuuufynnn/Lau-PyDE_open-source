@@ -69,8 +69,16 @@ class PythonHighlighter(QSyntaxHighlighter):
         self._rules.append((QRegularExpression(r"\b[0-9]+\.?[0-9]*\b"), number_format))
 
         string_format = make_format("#ce9178")
+        f_string_variable_format = make_format("#9CDCFE")
+
         self._rules.append((QRegularExpression(r"'[^'\\]*(\\.[^'\\]*)*'"), string_format))
         self._rules.append((QRegularExpression(r'"[^"\\]*(\\.[^"\\]*)*"'), string_format))
+        self._rules.append(
+            (
+                QRegularExpression(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}"),
+                    f_string_variable_format,
+            )
+        )
 
         self._comment_format = make_format("#6a9955")
         self._comment_pattern = QRegularExpression(r"#[^\n]*")
