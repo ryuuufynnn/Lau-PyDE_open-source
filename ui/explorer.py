@@ -65,14 +65,17 @@ class FileExplorer(QWidget):
         title_layout.addWidget(QLabel("Explorer"))
         title_layout.addStretch()
 
-        minimize_button = QPushButton("—")
-        maximize_button = QPushButton("□")
+        minimize_button = QPushButton("▁")
+        maximize_button = QPushButton("▢")
         minimize_button.setToolTip("Minimize explorer")
         maximize_button.setToolTip("Maximize or restore explorer")
         minimize_button.setFixedWidth(32)
         maximize_button.setFixedWidth(32)
         minimize_button.clicked.connect(self.minimize_requested)
         maximize_button.clicked.connect(self.maximize_requested)
+        # remove button borders to match other panels
+        minimize_button.setStyleSheet("border: none; min-height: 24px;")
+        maximize_button.setStyleSheet("border: none; min-height: 24px;")
         title_layout.addWidget(minimize_button)
         title_layout.addWidget(maximize_button)
 

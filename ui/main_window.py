@@ -3,7 +3,7 @@ import json
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence, QTextCursor
+from PySide6.QtGui import QAction, QKeySequence, QTextCursor, QTextCharFormat, QColor
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -593,8 +593,14 @@ class MainWindow(QMainWindow):
         self._stop_running_action.setEnabled(running)
 
     def _append_output(self, text: str) -> None:
+        # green text color for output (same as terminal)
         self.output_panel.moveCursor(QTextCursor.End)
-        self.output_panel.insertPlainText(text)
+        cursor = self.output_panel.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        green_format = QTextCharFormat()
+        green_format.setForeground(QColor("#00ff00"))
+        cursor.insertText(text, green_format)
+        self.output_panel.setTextCursor(cursor)
 
         # keep the unfinished line so a prompt split across process output
         # chunks (for example, "Enter your" + " name: ") is still detected.
