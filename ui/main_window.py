@@ -232,20 +232,25 @@ class MainWindow(QMainWindow):
         output_title_layout.addWidget(QLabel("Output"))
         output_title_layout.addStretch()
 
-        self._stop_running_button = QPushButton("Stop")
+        # replace textual Stop with a compact stop icon button
+        self._stop_running_button = QPushButton("⏹")
         self._stop_running_button.setToolTip("Stop the running Python program")
         self._stop_running_button.setEnabled(False)
         self._stop_running_button.clicked.connect(self.stop_running)
+        self._stop_running_button.setStyleSheet("border: none; min-height: 24px;")
         output_title_layout.addWidget(self._stop_running_button)
 
-        output_minimize_button = QPushButton("—")
-        output_maximize_button = QPushButton("□")
+        output_minimize_button = QPushButton("▁")
+        output_maximize_button = QPushButton("▢")
         output_minimize_button.setToolTip("Minimize output and terminal")
         output_maximize_button.setToolTip("Maximize or restore output")
         output_minimize_button.setFixedWidth(32)
         output_maximize_button.setFixedWidth(32)
         output_minimize_button.clicked.connect(self._minimize_bottom_panel)
         output_maximize_button.clicked.connect(lambda: self._maximize_pane("output"))
+        # remove button borders for a sleeker look
+        output_minimize_button.setStyleSheet("border: none; min-height: 24px;")
+        output_maximize_button.setStyleSheet("border: none; min-height: 24px;")
         output_title_layout.addWidget(output_minimize_button)
         output_title_layout.addWidget(output_maximize_button)
 
@@ -566,11 +571,11 @@ class MainWindow(QMainWindow):
         self.output_panel.clear()
         self.output_panel.stop_input()
         self._show_bottom_panel("output")
-        self._append_output(f"Running {self._current_file_path}\n\n")
+        self._append_output(f"Running at {self._current_file_path}\n")
 
         self._runner.run_file(self._current_file_path, working_dir)
         self._set_running_controls(True)
-        self.statusBar().showMessage("Running...")
+        self.statusBar().showMessage("status: running...")
 
     def stop_running(self) -> None:
         """Kill the program currently being run from the editor."""
@@ -580,7 +585,7 @@ class MainWindow(QMainWindow):
         self.output_panel.stop_input()
         self._active_prompt = ""
         self._runner.stop()
-        self._append_output("\nCode stop running successfully.\n")
+        self._append_output("\nCode stop running successfully.")
         self.statusBar().showMessage("Killed")
 
     def _set_running_controls(self, running: bool) -> None:
@@ -612,9 +617,9 @@ class MainWindow(QMainWindow):
         self._active_prompt = ""
         self._output_line_tail = ""
         self.output_panel.stop_input()
-        self._append_output(f"\nProcess finished with exit code {exit_code}. Thank You for using Lau-PyDE!\n")
+        self._append_output(f"Process finished with exit code {exit_code}. Thank You for using Lau-PyDE!\n")
         self._set_running_controls(False)
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage("status: ready")
 
     # pane layout
     def _minimize_bottom_panel(self) -> None:

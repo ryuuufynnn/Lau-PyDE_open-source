@@ -30,23 +30,20 @@ class TerminalPanel(QWidget):
         title_bar_layout.addWidget(QLabel("Terminal"))
         title_bar_layout.addStretch()
 
-        self._stop_button = QPushButton("Stop")
-        self._stop_button.setToolTip("Stop the running terminal command")
-        self._stop_button.setEnabled(False)
-        self._stop_button.clicked.connect(self.stop)
-
-        minimize_button = QPushButton("—")
-        maximize_button = QPushButton("□")
+        # terminal doesn't show a separate stop control (not useful here)
+        minimize_button = QPushButton("▁")
+        maximize_button = QPushButton("▢")
         minimize_button.setToolTip("Minimize terminal")
         maximize_button.setToolTip("Maximize or restore terminal")
         minimize_button.setFixedWidth(32)
         maximize_button.setFixedWidth(32)
         minimize_button.clicked.connect(self.minimize_requested)
         maximize_button.clicked.connect(self.maximize_requested)
-        title_bar_layout.addWidget(self._stop_button)
         title_bar_layout.addWidget(minimize_button)
         title_bar_layout.addWidget(maximize_button)
-        self.setStyleSheet("QPushButton { min-height: 24px; }")
+        # remove button borders for a cleaner title bar
+        minimize_button.setStyleSheet("border: none; min-height: 24px;")
+        maximize_button.setStyleSheet("border: none; min-height: 24px;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -84,7 +81,6 @@ class TerminalPanel(QWidget):
         self._process.setProcessChannelMode(QProcess.MergedChannels)
         self._process.readyReadStandardOutput.connect(self._handle_output)
         self._process.finished.connect(self._handle_finished)
-        self._stop_button.setEnabled(True)
 
         # running through the system shell (bash) means pipes, quotes,
         # and things like `pip --version` behave as the user expects.
@@ -111,7 +107,6 @@ class TerminalPanel(QWidget):
     def _handle_finished(self, _exit_code: int, _exit_status) -> None:
         self._output.appendPlainText("")
         self._process = None
-        self._stop_button.setEnabled(False)
         self._show_prompt()
 
     def _show_prompt(self) -> None:
