@@ -113,7 +113,12 @@ class MainWindow(QMainWindow):
         self.editor = CodeEditor()
         self.editor.document().modificationChanged.connect(self._on_modification_changed)
 
+        # self.explorer = FileExplorer()
+        # self.load_recent_project()
+        # self.explorer.file_double_clicked.connect(self.open_file)
         self.explorer = FileExplorer()
+        self.explorer.set_root_folder(None)
+
         self.load_recent_project()
         self.explorer.file_double_clicked.connect(self.open_file)
 
@@ -232,6 +237,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(open_folder_action)
 
         close_project_action = QAction("Close Project", self)
+        close_project_action.setShortcut(QKeySequence("Ctrl+P"))
         close_project_action.triggered.connect(self.close_project)
         file_menu.addAction(close_project_action)
 

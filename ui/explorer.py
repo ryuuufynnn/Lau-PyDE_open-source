@@ -11,7 +11,7 @@ and nothing outside the opened folder is ever touched.
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QModelIndex
 from PySide6.QtWidgets import (
     QFileSystemModel,
     QHBoxLayout,
@@ -53,9 +53,15 @@ class FileExplorer(QWidget):
 
         self._tree.doubleClicked.connect(self._on_double_clicked)
 
+        # title_bar = QWidget()
+        # title_layout = QHBoxLayout(title_bar)
+        # title_layout.setContentsMargins(4, 4, 4, 0)
         title_bar = QWidget()
+        title_bar.setFixedHeight(32)
+
         title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(4, 4, 4, 0)
+        title_layout.setContentsMargins(4, 0, 4, 0)
+
         title_layout.addWidget(QLabel("Explorer"))
         title_layout.addStretch()
 
@@ -72,13 +78,22 @@ class FileExplorer(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(title_bar)
         layout.addWidget(self._tree)
+        layout.addStretch()
 
-    def set_root_folder(self, folder_path: str) -> None:
+    def set_root_folder(self, folder_path: str | None) -> None:
         """Point the explorer at a new project folder."""
+
+        # if walang naka open na folder dapat walang path
+        if not folder_path:
+            self._tree.hide()
+            return
+        
         root_index = self._model.setRootPath(folder_path)
         self._tree.setRootIndex(root_index)
+        self._tree.show()
 
     def _on_double_clicked(self, index) -> None:
         path = self._model.filePath(index)
