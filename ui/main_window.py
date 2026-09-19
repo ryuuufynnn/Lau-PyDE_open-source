@@ -231,6 +231,10 @@ class MainWindow(QMainWindow):
         open_folder_action.triggered.connect(self.open_folder_dialog)
         file_menu.addAction(open_folder_action)
 
+        close_project_action = QAction("Close Project", self)
+        close_project_action.triggered.connect(self.close_project)
+        file_menu.addAction(close_project_action)
+
         file_menu.addSeparator()
 
         save_action = QAction("Save", self)
@@ -379,6 +383,26 @@ class MainWindow(QMainWindow):
                 json.dumps({"project": folder})
             )
             self.statusBar().showMessage(f"Workspace: {folder}")
+
+    def close_project(self) -> None:
+        """Close the current project workspace."""
+        self._current_folder = None
+        self._current_file_path = None
+
+        self.editor.clear()
+        self.explorer.hide()
+
+        # remove the current project folder from the IDE and set to None
+        self.explorer.set_root_folder(None)
+
+        if RECENT_PROJECT_FILE.exists():
+            try:
+                RECENT_PROJECT_FILE.unlink()
+            except OSError:
+                pass
+
+        self._update_title()
+        self.statusBar().showMessage("Project closed")
 
     def save_file(self) -> bool:
         """Save to the current file path, prompting for one if there isn't one yet.
