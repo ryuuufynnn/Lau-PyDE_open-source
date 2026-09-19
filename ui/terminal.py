@@ -73,6 +73,11 @@ class TerminalPanel(QWidget):
             self._show_prompt()
             return
 
+        if command == "lau c":
+            self._output.clear()
+            self._show_prompt()
+            return
+
         self._process = QProcess()
         self._process.setWorkingDirectory(self._working_dir)
         # Merge stdout and stderr so error output shows up too.
@@ -108,19 +113,6 @@ class TerminalPanel(QWidget):
         self._process = None
         self._stop_button.setEnabled(False)
         self._show_prompt()
-
-    # def colors(self):
-    #     # ANSI escape codes for colors
-    #     RED = "\033[91m"
-    #     GREEN = "\033[92m"
-    #     YELLOW = "\033[93m"
-    #     BLUE = "\033[94m"
-    #     MAGENTA = "\033[95m"
-    #     CYAN = "\033[96m"
-    #     RESET = "\033[0m"
-
-    #     return RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, RESET
-
 
     def _show_prompt(self) -> None:
         current_path = Path.cwd()
