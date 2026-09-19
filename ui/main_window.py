@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from typing import Optional
 
 from PySide6.QtCore import Qt
@@ -26,6 +27,8 @@ from ui.terminal import TerminalPanel
 
 APP_NAME = "Lau-PyDE"
 APP_VERSION = "0.0.1"
+
+RECENT_PROJECT_FILE = Path.home() / ".lau_pyde_recent.json"
 
 DARK_STYLESHEET = """
 
@@ -111,6 +114,7 @@ class MainWindow(QMainWindow):
         self.editor.document().modificationChanged.connect(self._on_modification_changed)
 
         self.explorer = FileExplorer()
+        self.load_recent_project()
         self.explorer.file_double_clicked.connect(self.open_file)
 
         self.output_panel = InlineInputOutput()
@@ -298,7 +302,7 @@ class MainWindow(QMainWindow):
         self._stop_running_action.triggered.connect(self.stop_running)
         run_menu.addAction(self._stop_running_action)
 
-        # --- View menu ---
+        # view menu
         view_menu = menu_bar.addMenu("&View")
 
         show_explorer_action = QAction("Show Explorer", self)
@@ -324,8 +328,7 @@ class MainWindow(QMainWindow):
         focus_terminal_action.triggered.connect(self._focus_terminal)
         terminal_menu.addAction(focus_terminal_action)
 
-    # ---- File operations ---------------------------------------------------
-
+    # file operations
     def new_file(self) -> None:
         if not self._confirm_discard_changes():
             return
@@ -363,10 +366,19 @@ class MainWindow(QMainWindow):
     def open_folder_dialog(self) -> None:
         start_dir = self._current_folder or str(Path.home())
         folder = QFileDialog.getExistingDirectory(self, "Open Folder", start_dir)
+
         if folder:
+            # self._current_folder = folder
+            # # self.explorer.set_root_folder(folder)
+            # self.terminal_panel.set_working_directory(folder)
+            # self.statusBar().showMessage(f"Workspace: {folder}")
             self._current_folder = folder
             self.explorer.set_root_folder(folder)
             self.terminal_panel.set_working_directory(folder)
+
+            RECENT_PROJECT_FILE.write_text(
+                json.dumps({"project": folder})
+            )
             self.statusBar().showMessage(f"Workspace: {folder}")
 
     def save_file(self) -> bool:
@@ -387,6 +399,20 @@ class MainWindow(QMainWindow):
         self._update_title()
         self.statusBar().showMessage(f"Saved {self._current_file_path}")
         return True
+
+    def load_recent_project(self) -> None:
+        if not RECENT_PROJECT_FILE.exists():
+            return
+        try:
+            data = json.loads(RECENT_PROJECT_FILE.read_text())
+            folder = data.get("project")
+
+            if folder and Path(folder).is_dir():
+                self._current_folder = folder
+                self.explorer.set_root_folder(folder)
+                
+        except (json.JSONDecodeError, OSError):
+            pass
 
     def save_file_as(self) -> bool:
         start_dir = self._current_folder or str(Path.home())
@@ -414,8 +440,7 @@ class MainWindow(QMainWindow):
             return self.save_file()
         return choice == QMessageBox.Discard
 
-    # ---- Run ----------------------------------------------------------------
-
+    # run
     def run_file(self) -> None:
         if self._runner.is_running():
             QMessageBox.information(self, APP_NAME, "A program is already running.")
@@ -556,7 +581,6 @@ class MainWindow(QMainWindow):
         self._show_bottom_panel("terminal")
 
     # misc
-
     def _on_modification_changed(self, _modified: bool) -> None:
         self._update_title()
 
