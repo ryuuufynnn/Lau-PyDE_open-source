@@ -394,6 +394,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(show_output_action)
 
         show_terminal_action = QAction("Show Terminal", self)
+        show_terminal_action.setShortcut(QKeySequence("Ctrl+T"))
         show_terminal_action.triggered.connect(lambda: self._show_bottom_panel("terminal"))
         view_menu.addAction(show_terminal_action)
 
