@@ -1,3 +1,4 @@
+import ast
 from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt
 from PySide6.QtGui import (
     QColor,
@@ -85,7 +86,7 @@ class PythonHighlighter(QSyntaxHighlighter):
                     start, length = match.capturedStart(), match.capturedLength()
                 self.setFormat(start, length, fmt)
 
-        # Comments are applied last so "#" inside a comment always wins,
+        # comments are applied last so "#" inside a comment always wins,
         # even if part of the comment text matched an earlier rule.
         comment_iterator = self._comment_pattern.globalMatch(text)
         while comment_iterator.hasNext():
@@ -148,10 +149,22 @@ class CodeEditor(QPlainTextEdit):
         self._update_line_number_area_width(0)
         self._highlight_current_line()
 
+        self._error_line = None
         self._highlighter = PythonHighlighter(self.document())
+        self.textChanged.connect(self._check_errors)
 
-    # ---- Line number gutter --------------------------------------------
+    def _check_errors(self) -> None:
+        code = self.toPlainText()
+        self._error_line = None
 
+        try:
+            ast.parse(code)
+        except SyntaxError as error:
+            self._error_line = error.lineno
+
+        self._highlight_current_line()
+
+    # line number gutter
     def line_number_area_width(self) -> int:
         digits = len(str(max(1, self.blockCount())))
         return 12 + self.fontMetrics().horizontalAdvance("9") * digits
@@ -204,7 +217,7 @@ class CodeEditor(QPlainTextEdit):
         selection.cursor.clearSelection()
         self.setExtraSelections([selection])
 
-    # ---- Auto indentation -----------------------------------------------
+    # auto indentation
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
