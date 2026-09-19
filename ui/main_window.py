@@ -238,6 +238,7 @@ class MainWindow(QMainWindow):
         self._stop_running_button.setEnabled(False)
         self._stop_running_button.clicked.connect(self.stop_running)
         self._stop_running_button.setStyleSheet("border: none; min-height: 24px;")
+        self._stop_running_button.setCursor(Qt.PointingHandCursor)
         output_title_layout.addWidget(self._stop_running_button)
 
         output_minimize_button = QPushButton("▁")
@@ -256,6 +257,13 @@ class MainWindow(QMainWindow):
 
         output_layout.addWidget(output_title)
         output_layout.addWidget(self.output_panel)
+
+        # for loop approach para sa pointer na cursor
+        for pointer in (
+            output_minimize_button,
+            output_maximize_button,
+        ):
+            pointer.setCursor(Qt.PointingHandCursor)
 
         bottom_tabs = QTabWidget()
         bottom_tabs.addTab(output_container, "Output")
@@ -406,6 +414,19 @@ class MainWindow(QMainWindow):
         restore_layout_action = QAction("Restore Layout", self)
         restore_layout_action.triggered.connect(self._restore_layout)
         view_menu.addAction(restore_layout_action)
+
+        # for loop for pointing hand cursor
+        # for items in (
+        #     new_action,
+        #     open_action,
+        #     open_folder_action,
+        #     close_project_action,
+        #     save_action,
+        #     save_as_action,
+        #     exit_action,
+        # ):
+        #     # common QAction settings here: for future use
+        #     items.setCursor(Qt.PointingHandCursor)
 
         # termnal layout
         terminal_menu = menu_bar.addMenu("&Terminal")
@@ -575,7 +596,7 @@ class MainWindow(QMainWindow):
 
         self._runner.run_file(self._current_file_path, working_dir)
         self._set_running_controls(True)
-        self.statusBar().showMessage("status: running...")
+        self.statusBar().showMessage("status: running")
 
     def stop_running(self) -> None:
         """Kill the program currently being run from the editor."""

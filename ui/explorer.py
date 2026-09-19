@@ -11,7 +11,7 @@ and nothing outside the opened folder is ever touched.
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal, QModelIndex
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QFileSystemModel,
     QHBoxLayout,
@@ -78,6 +78,9 @@ class FileExplorer(QWidget):
         maximize_button.setStyleSheet("border: none; min-height: 24px;")
         title_layout.addWidget(minimize_button)
         title_layout.addWidget(maximize_button)
+
+        for pointer in maximize_button, minimize_button:
+            pointer.setCursor(Qt.PointingHandCursor)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

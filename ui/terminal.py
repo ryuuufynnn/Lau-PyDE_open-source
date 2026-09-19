@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, Signal
+from PySide6.QtCore import QProcess, Signal, Qt
 from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
@@ -36,7 +36,9 @@ class TerminalPanel(QWidget):
         minimize_button.setToolTip("Minimize terminal")
         maximize_button.setToolTip("Maximize or restore terminal")
         minimize_button.setFixedWidth(32)
+        minimize_button.setCursor(Qt.PointingHandCursor)
         maximize_button.setFixedWidth(32)
+        maximize_button.setCursor(Qt.PointingHandCursor)
         minimize_button.clicked.connect(self.minimize_requested)
         maximize_button.clicked.connect(self.maximize_requested)
         title_bar_layout.addWidget(minimize_button)
