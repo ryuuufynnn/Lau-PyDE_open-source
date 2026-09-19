@@ -445,8 +445,8 @@ class MainWindow(QMainWindow):
         self.output_panel.stop_input()
         self._active_prompt = ""
         self._runner.stop()
-        self._append_output("\nStopping process...\n")
-        self.statusBar().showMessage("Stopping...")
+        self._append_output("\nCode stop running successfully.\n")
+        self.statusBar().showMessage("Killed")
 
     def _set_running_controls(self, running: bool) -> None:
         self._stop_running_button.setEnabled(running)
