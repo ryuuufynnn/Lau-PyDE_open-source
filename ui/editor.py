@@ -1,5 +1,7 @@
 import ast
 import difflib
+import tokenize
+from io import StringIO
 from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt
 from PySide6.QtGui import (
     QColor,
@@ -143,9 +145,11 @@ class CodeEditor(QPlainTextEdit):
         font.setPointSize(11)
         self.setFont(font)
 
-        self._error_line = None
-        self._error_start = None
-        self._error_end = None
+        # self._error_line = None
+        # self._error_start = None
+        # self._error_end = None
+        self._syntax_errors = []
+        self._keyword_errors = []
         self._name_errors = []
 
         # Code editors traditionally scroll sideways rather than wrap.
@@ -170,17 +174,44 @@ class CodeEditor(QPlainTextEdit):
     def _check_errors(self) -> None:
         code = self.toPlainText()
         
-        self._error_line = None
-        self._error_start = None
-        self._error_end = None
+        # self._error_line = None
+        # self._error_start = None
+        # self._error_end = None
+        self._syntax_errors = []
+        self._keyword_errors = []
         self._name_errors = []
+        
+        try:
+            list(tokenize.generate_tokens(StringIO(code).readline))
+        except tokenize.TokenError as error:
+            message, location = error.args
+
+            if location:
+                line, column = location
+
+                self._syntax_errors.append(
+                    (
+                        line,
+                        column + 1,
+                        column + 2,
+                    )
+                )
 
         try:
             tree = ast.parse(code)
         except SyntaxError as error:
-            self._error_line = error.lineno
-            self._error_start = error.offset
-            self._error_end = getattr(error, "end_offset", None)
+            if error.lineno is not None and error.offset is not None:
+                start = error.offset
+                end = getattr(error, "end_offset", None)
+
+                self._syntax_errors.append(
+                    (
+                        error.lineno,
+                        start,
+                        end,
+                    )
+                )
+
             self._highlight_current_line()
         else:
             for node in ast.walk(tree):
@@ -270,37 +301,38 @@ class CodeEditor(QPlainTextEdit):
         selections.append(current_selection)
 
         # syntax error
-        if self._error_line is not None and self._error_start is not None:
-            block = self.document().findBlockByLineNumber(
-                self._error_line - 1
+        # syntax errors
+        for line, start, end in self._syntax_errors:
+            block = self.document().findBlockByLineNumber(line - 1)
+
+            if not block.isValid():
+                continue
+
+            error_selection = QTextEdit.ExtraSelection()
+
+            error_selection.format.setUnderlineColor(
+                QColor("#f44747")
+            )
+            error_selection.format.setUnderlineStyle(
+                QTextCharFormat.WaveUnderline
             )
 
-            if block.isValid():
-                error_selection = QTextEdit.ExtraSelection()
+            start = max(0, start - 1)
 
-                error_selection.format.setUnderlineColor(
-                    QColor("#f44747")
-                )
-                error_selection.format.setUnderlineStyle(
-                    QTextCharFormat.WaveUnderline
-                )
+            if end is not None:
+                end = max(start + 1, end - 1)
+            else:
+                end = min(start + 1, len(block.text()))
 
-                start = max(0, self._error_start - 1)
+            cursor = QTextCursor(block)
+            cursor.setPosition(block.position() + start)
+            cursor.setPosition(
+                block.position() + end,
+                QTextCursor.KeepAnchor,
+            )
 
-                if self._error_end is not None:
-                    end = max(start + 1, self._error_end - 1)
-                else:
-                    end = min(start + 1, len(block.text()))
-
-                cursor = QTextCursor(block)
-                cursor.setPosition(block.position() + start)
-                cursor.setPosition(
-                    block.position() + end,
-                    QTextCursor.KeepAnchor,
-                )
-
-                error_selection.cursor = cursor
-                selections.append(error_selection)
+            error_selection.cursor = cursor
+            selections.append(error_selection)
 
         self.setExtraSelections(selections)
 
