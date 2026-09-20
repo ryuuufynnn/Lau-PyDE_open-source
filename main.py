@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication
 
 from ui.main_window import DARK_STYLESHEET, MainWindow
 
-PENGUIN_NAME = "naughty_frog"
+PENGUIN_NAME = "Sissa"
 
 def main():
     app = QApplication(sys.argv)

@@ -295,7 +295,14 @@ class CodeEditor(QPlainTextEdit):
             if token.type in (tokenize.INDENT, tokenize.DEDENT):
                 continue
 
+            # Only consider names that start a statement. Ignore known
+            # builtins (including `self`) so they are never suggested as
+            # keyword typos.
             if at_statement_start and token.type == tokenize.NAME:
+                if token.string in PYTHON_BUILTINS:
+                    at_statement_start = False
+                    continue
+
                 if token.string not in PYTHON_KEYWORDS:
                     matches = difflib.get_close_matches(
                         token.string,
@@ -339,9 +346,19 @@ class CodeEditor(QPlainTextEdit):
             self._highlight_current_line()
             return
 
-        for token in tokens:
+        # Tokenize-based name checks: skip NAME tokens that are part of
+        # attribute access (i.e. those immediately following a '.').
+        for idx, token in enumerate(tokens):
             if token.type != tokenize.NAME:
                 continue
+
+            # If previous significant token was a dot, this NAME is an
+            # attribute (e.g. `obj.attr`) and should not be treated as a
+            # standalone name for builtin-misspelling checks.
+            if idx > 0:
+                prev = tokens[idx - 1]
+                if prev.type == tokenize.OP and prev.string == ".":
+                    continue
 
             if token.string in PYTHON_KEYWORDS:
                 continue
