@@ -494,6 +494,17 @@ class MainWindow(QMainWindow):
         self.editor.setPlainText(content)
         self._current_file_path = path
         self.editor.document().setModified(False)
+
+        if self._current_folder:
+            RECENT_PROJECT_FILE.write_text(
+                json.dumps(
+                    {
+                        "project": self._current_folder,
+                        "file": path,
+                    }
+                )
+            )
+
         self._update_title()
         self.statusBar().showMessage(f"Opened {path}")
 
@@ -568,6 +579,11 @@ class MainWindow(QMainWindow):
             if folder and Path(folder).is_dir():
                 self._current_folder = folder
                 self.explorer.set_root_folder(folder)
+
+                file_path = data.get("file")
+
+                if file_path and Path(file_path).is_file():
+                    self.open_file(file_path)
                 
         except (json.JSONDecodeError, OSError):
             pass
