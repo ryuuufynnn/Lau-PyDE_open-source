@@ -214,6 +214,24 @@ class CodeEditor(QPlainTextEdit):
 
         return messages
 
+    def _collect_defined_names(self, tree: ast.AST) -> set[str]:
+        """Collect names that are actually defined in the code so we do not
+        flag valid variables as misspellings or undefined names."""
+        defined: set[str] = set()
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined.add(node.name)
+            elif isinstance(node, ast.arg):
+                defined.add(node.arg)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                defined.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    defined.add(alias.asname or alias.name.split(".")[0])
+
+        return defined
+
     def _check_errors(self) -> None:
         code = self.toPlainText()
 
@@ -279,6 +297,27 @@ class CodeEditor(QPlainTextEdit):
 
         self._name_errors = []
 
+        defined_names: set[str] = set()
+
+        try:
+            tree = ast.parse(code)
+            defined_names = self._collect_defined_names(tree)
+        except SyntaxError as error:
+            if error.lineno is not None and error.offset is not None:
+                start = error.offset
+                end = getattr(error, "end_offset", None)
+
+                self._syntax_errors.append(
+                    (
+                        error.lineno,
+                        start,
+                        end,
+                    )
+                )
+
+            self._highlight_current_line()
+            return
+
         for token in tokens:
             if token.type != tokenize.NAME:
                 continue
@@ -287,6 +326,9 @@ class CodeEditor(QPlainTextEdit):
                 continue
 
             if token.string in PYTHON_BUILTINS:
+                continue
+
+            if token.string in defined_names:
                 continue
 
             matches = difflib.get_close_matches(
@@ -308,47 +350,39 @@ class CodeEditor(QPlainTextEdit):
                 self._name_errors.append(item)
                 seen_name.add(item)
 
-        try:
-            tree = ast.parse(code)
-        except SyntaxError as error:
-            if error.lineno is not None and error.offset is not None:
-                start = error.offset
-                end = getattr(error, "end_offset", None)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Name):
+                continue
 
-                self._syntax_errors.append(
-                    (
-                        error.lineno,
-                        start,
-                        end,
-                    )
+            if not isinstance(node.ctx, ast.Load):
+                continue
+
+            if node.id in PYTHON_KEYWORDS:
+                continue
+
+            if node.id in PYTHON_BUILTINS:
+                continue
+
+            if node.id in defined_names:
+                continue
+
+            matches = difflib.get_close_matches(
+                node.id,
+                PYTHON_BUILTINS,
+                n=1,
+                cutoff=0.75,
+            )
+
+            if matches:
+                item = (
+                    node.lineno,
+                    node.col_offset,
+                    node.end_col_offset,
                 )
-
-            self._highlight_current_line()
-        else:
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Name):
-                    continue
-
-                if node.id in PYTHON_BUILTINS:
-                    continue
-
-                matches = difflib.get_close_matches(
-                    node.id,
-                    PYTHON_BUILTINS,
-                    n=1,
-                    cutoff=0.75,
-                )
-
-                if matches:
-                    item = (
-                        node.lineno,
-                        node.col_offset,
-                        node.end_col_offset,
-                    )
-                    if item not in seen_name:
-                        self._name_errors.append(item)
-                        seen_name.add(item)
-            self._highlight_current_line()
+                if item not in seen_name:
+                    self._name_errors.append(item)
+                    seen_name.add(item)
+        self._highlight_current_line()
 
     # line number gutter
     def line_number_area_width(self) -> int:

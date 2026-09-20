@@ -115,6 +115,29 @@ class MainWindow(QMainWindow):
         self.editor = CodeEditor()
         self.editor.document().modificationChanged.connect(self._on_modification_changed)
 
+        self._file_label = QLabel("Untitled")
+        self._file_label.setStyleSheet(
+            "font-size: 12px; font-weight: bold; color: #d4d4d4;"
+        )
+        self._error_badge = QLabel("")
+        self._error_badge.setStyleSheet(
+            "font-size: 11px; font-weight: bold; color: #ff6b6b;"
+        )
+
+        editor_header = QWidget()
+        header_layout = QHBoxLayout(editor_header)
+        header_layout.setContentsMargins(10, 6, 10, 6)
+        header_layout.addWidget(self._file_label)
+        header_layout.addStretch()
+        header_layout.addWidget(self._error_badge)
+
+        self._editor_container = QWidget()
+        editor_container_layout = QVBoxLayout(self._editor_container)
+        editor_container_layout.setContentsMargins(0, 0, 0, 0)
+        editor_container_layout.setSpacing(0)
+        editor_container_layout.addWidget(editor_header)
+        editor_container_layout.addWidget(self.editor)
+
         # starting code for the welcome message
         # Welcome screen
         self._editor_stack = QStackedWidget()
@@ -182,7 +205,7 @@ class MainWindow(QMainWindow):
 
         welcome_layout.addWidget(welcome_footer)
         self._editor_stack.addWidget(self._welcome_widget)
-        self._editor_stack.addWidget(self.editor)
+        self._editor_stack.addWidget(self._editor_container)
         self._editor_stack.setCurrentWidget(self._welcome_widget)
 
         # self.explorer = FileExplorer()
@@ -709,7 +732,7 @@ class MainWindow(QMainWindow):
             self._main_splitter.setSizes([self.width(), 0])
         else:
             self.explorer.hide()
-            self.editor.hide()
+            self._editor_container.hide()
             self._bottom_tabs.show()
             self._bottom_tabs.setCurrentWidget(
                 self._output_container if pane == "output" else self.terminal_panel
@@ -740,7 +763,7 @@ class MainWindow(QMainWindow):
        self._editor_stack.setCurrentWidget(self._welcome_widget)   
 
     def _show_editor(self) -> None:
-        self._editor_stack.setCurrentWidget(self.editor)
+        self._editor_stack.setCurrentWidget(self._editor_container)
 
     def _show_bottom_panel(self, pane: str) -> None:
         self._restore_layout()
@@ -762,7 +785,19 @@ class MainWindow(QMainWindow):
     def _update_title(self) -> None:
         name = Path(self._current_file_path).name if self._current_file_path else "Untitled"
         star = "*" if self.editor.document().isModified() else ""
-        self.setWindowTitle(f"{star}{name} — {APP_NAME}")
+
+        error_count = 0
+        if self._current_file_path is not None:
+            self.editor._check_errors()
+            error_count = len(self.editor.get_error_messages())
+
+        title = f"{star}{name}"
+        if error_count > 0:
+            title = f"{title}    {error_count}"
+
+        self._file_label.setText(name)
+        self._error_badge.setText(f"{error_count}" if error_count > 0 else "")
+        self.setWindowTitle(f"{title} — {APP_NAME}")
 
     def closeEvent(self, event) -> None:
         """Called automatically by Qt when the user tries to close the window."""
