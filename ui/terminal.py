@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, Signal, Qt
@@ -104,7 +105,17 @@ class TerminalPanel(QWidget):
         data = self._process.readAllStandardOutput()
         text = bytes(data).decode("utf-8", errors="replace")
         self._output.moveCursor(QTextCursor.End)
-        self._output.insertPlainText(text)
+
+        error_pattern = re.compile(
+            r"(Traceback \(most recent call last\):|File \".*\"|\b(?:SyntaxError|NameError|ValueError|TypeError|IndexError|KeyError|AttributeError|IndentationError|TabError|AssertionError|RuntimeError|ModuleNotFoundError|ImportError)\b|Error:|Exception:)",
+            re.IGNORECASE,
+        )
+        format_ = QTextCharFormat()
+        format_.setForeground(QColor("#ff6b6b") if error_pattern.search(text) else QColor("#00ff00"))
+        cursor = self._output.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(text, format_)
+        self._output.setTextCursor(cursor)
 
     def _handle_finished(self, _exit_code: int, _exit_status) -> None:
         self._output.appendPlainText("")

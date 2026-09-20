@@ -171,16 +171,62 @@ class CodeEditor(QPlainTextEdit):
         self._highlighter = PythonHighlighter(self.document())
         self.textChanged.connect(self._check_errors)
 
+    def get_error_messages(self) -> list[str]:
+        """Return human-readable error messages for all current issues."""
+        self._check_errors()
+
+        messages: list[str] = []
+
+        for line, start, end in self._syntax_errors:
+            block = self.document().findBlockByLineNumber(line - 1)
+            if not block.isValid():
+                messages.append(f"Line {line}: Syntax error.")
+                continue
+            text = block.text().strip()
+            if not text:
+                messages.append(f"Line {line}: Syntax error.")
+                continue
+            messages.append(f"Line {line}: Syntax error near '{text}'.")
+
+        for line, start, end in self._keyword_errors:
+            block = self.document().findBlockByLineNumber(line - 1)
+            if not block.isValid():
+                messages.append(f"Line {line}: Possible keyword typo.")
+                continue
+            text = block.text()
+            token_text = text[start:end].strip()
+            if not token_text:
+                messages.append(f"Line {line}: Possible keyword typo.")
+                continue
+            messages.append(f"Line {line}: '{token_text}' is not valid Python. Did you mean '{text[start:end].strip()}'?")
+
+        for line, start, end in self._name_errors:
+            block = self.document().findBlockByLineNumber(line - 1)
+            if not block.isValid():
+                messages.append(f"Line {line}: Name error.")
+                continue
+            text = block.text()
+            token_text = text[start:end].strip()
+            if not token_text:
+                messages.append(f"Line {line}: Name error.")
+                continue
+            messages.append(f"Line {line}: '{token_text}' is not recognized. Check the spelling or name.")
+
+        return messages
+
     def _check_errors(self) -> None:
         code = self.toPlainText()
-        
+
         # self._error_line = None
         # self._error_start = None
         # self._error_end = None
         self._syntax_errors = []
         self._keyword_errors = []
         self._name_errors = []
-        
+        seen_syntax = set()
+        seen_keyword = set()
+        seen_name = set()
+
         try:
             list(tokenize.generate_tokens(StringIO(code).readline))
         except tokenize.TokenError as error:
@@ -188,14 +234,10 @@ class CodeEditor(QPlainTextEdit):
 
             if location:
                 line, column = location
-
-                self._syntax_errors.append(
-                    (
-                        line,
-                        column + 1,
-                        column + 2,
-                    )
-                )
+                item = (line, column + 1, column + 2)
+                if item not in seen_syntax:
+                    self._syntax_errors.append(item)
+                    seen_syntax.add(item)
 
         tokens = []
 
@@ -224,13 +266,14 @@ class CodeEditor(QPlainTextEdit):
                     )
 
                     if matches:
-                        self._keyword_errors.append(
-                            (
-                                token.start[0],
-                                token.start[1],
-                                token.end[1],
-                            )
+                        item = (
+                            token.start[0],
+                            token.start[1],
+                            token.end[1],
                         )
+                        if item not in seen_keyword:
+                            self._keyword_errors.append(item)
+                            seen_keyword.add(item)
 
                 at_statement_start = False
 
@@ -256,13 +299,14 @@ class CodeEditor(QPlainTextEdit):
             if not matches:
                 continue
 
-            self._name_errors.append(
-                (
-                    token.start[0],
-                    token.start[1],
-                    token.end[1],
-                )
+            item = (
+                token.start[0],
+                token.start[1],
+                token.end[1],
             )
+            if item not in seen_name:
+                self._name_errors.append(item)
+                seen_name.add(item)
 
         try:
             tree = ast.parse(code)
@@ -296,13 +340,14 @@ class CodeEditor(QPlainTextEdit):
                 )
 
                 if matches:
-                    self._name_errors.append(
-                        (
-                            node.lineno,
-                            node.col_offset,
-                            node.end_col_offset,
-                        )
+                    item = (
+                        node.lineno,
+                        node.col_offset,
+                        node.end_col_offset,
                     )
+                    if item not in seen_name:
+                        self._name_errors.append(item)
+                        seen_name.add(item)
             self._highlight_current_line()
 
     # line number gutter

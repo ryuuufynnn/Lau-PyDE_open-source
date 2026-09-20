@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import re
 from typing import Optional
 
 from PySide6.QtCore import Qt
@@ -588,6 +589,20 @@ class MainWindow(QMainWindow):
 
         working_dir = self._current_folder or str(Path(self._current_file_path).parent)
 
+        self.editor._check_errors()
+        error_messages = self.editor.get_error_messages()
+        if error_messages:
+            self._output_line_tail = ""
+            self.output_panel.clear()
+            self.output_panel.stop_input()
+            self._show_bottom_panel("output")
+            self._append_error_output("Code issues found:\n")
+            for message in error_messages:
+                self._append_error_output(f"- {message}\n")
+            self._set_running_controls(False)
+            self.statusBar().showMessage("status: ready")
+            return
+
         self._output_line_tail = ""
         self.output_panel.clear()
         self.output_panel.stop_input()
@@ -612,15 +627,28 @@ class MainWindow(QMainWindow):
     def _set_running_controls(self, running: bool) -> None:
         self._stop_running_button.setEnabled(running)
         self._stop_running_action.setEnabled(running)
-
-    def _append_output(self, text: str) -> None:
-        # green text color for output (same as terminal)
+    def _append_error_output(self, text: str) -> None:
         self.output_panel.moveCursor(QTextCursor.End)
         cursor = self.output_panel.textCursor()
         cursor.movePosition(QTextCursor.End)
-        green_format = QTextCharFormat()
-        green_format.setForeground(QColor("#00ff00"))
-        cursor.insertText(text, green_format)
+        error_format = QTextCharFormat()
+        error_format.setForeground(QColor("#ff6b6b"))
+        cursor.insertText(text, error_format)
+        self.output_panel.setTextCursor(cursor)
+    def _append_output(self, text: str) -> None:
+        self.output_panel.moveCursor(QTextCursor.End)
+        cursor = self.output_panel.textCursor()
+        cursor.movePosition(QTextCursor.End)
+
+        error_pattern = re.compile(
+            r"(Traceback \(most recent call last\):|File \".*\"|\b(?:SyntaxError|NameError|ValueError|TypeError|IndexError|KeyError|AttributeError|IndentationError|TabError|AssertionError|RuntimeError|ModuleNotFoundError|ImportError)\b|Error:|Exception:)",
+            re.IGNORECASE,
+        )
+        output_format = QTextCharFormat()
+        output_format.setForeground(
+            QColor("#ff6b6b") if error_pattern.search(text) else QColor("#00ff00")
+        )
+        cursor.insertText(text, output_format)
         self.output_panel.setTextCursor(cursor)
 
         # keep the unfinished line so a prompt split across process output
