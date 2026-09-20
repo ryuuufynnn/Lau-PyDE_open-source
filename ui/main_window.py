@@ -616,6 +616,12 @@ class MainWindow(QMainWindow):
 
         error_messages = self.editor.get_error_messages()
 
+        if self._current_file_path:
+            self.explorer.set_error_count(
+                self._current_file_path,
+                len(error_messages),
+            )
+
         if error_messages:
             self._output_line_tail = ""
 
@@ -645,10 +651,25 @@ class MainWindow(QMainWindow):
 
             return
 
+        # self._output_line_tail = ""
+        # self.output_panel.clear()
+        # self.output_panel.setPlainText("")
+        # self.output_panel.stop_input()
+        # self._show_bottom_panel("output")
+        # self._append_output(f"Running at {self._current_file_path}\n")
+
         self._output_line_tail = ""
+
         self.output_panel.clear()
+        self.output_panel.setPlainText("")
         self.output_panel.stop_input()
+
         self._show_bottom_panel("output")
+
+        cursor = self.output_panel.textCursor()
+        cursor.movePosition(QTextCursor.Start)
+        self.output_panel.setTextCursor(cursor)
+
         self._append_output(f"Running at {self._current_file_path}\n")
 
         self._runner.run_file(self._current_file_path, working_dir)

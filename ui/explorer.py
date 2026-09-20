@@ -11,7 +11,8 @@ and nothing outside the opened folder is ever touched.
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QModelIndex
+from PySide6.QtGui import QColor, QPainter 
 from PySide6.QtWidgets import (
     QFileSystemModel,
     QHBoxLayout,
@@ -20,7 +21,50 @@ from PySide6.QtWidgets import (
     QTreeView,
     QVBoxLayout,
     QWidget,
+    QStyledItemDelegate,
 )
+
+class ErrorCountDelegate(QStyledItemDelegate):
+    """Draws the file name and its code-issue count."""
+
+    def __init__(self, explorer, parent=None):
+        super().__init__(parent)
+        self.explorer = explorer
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        super().paint(painter, option, index)
+
+        path = self.explorer._model.filePath(index)
+        count = self.explorer._error_counts.get(path)
+
+        if not count:
+            return
+
+        painter.save()
+
+        badge_width = 20
+        badge_height = 18
+
+        badge_x = option.rect.right() - badge_width - 6
+        badge_y = option.rect.center().y() - badge_height // 2
+
+        badge_rect = option.rect.__class__(
+            badge_x,
+            badge_y,
+            badge_width,
+            badge_height,
+        )
+
+        painter.setPen(Qt.NoPen)
+
+        painter.setPen(QColor("#ffd500"))
+        painter.drawText(
+            badge_rect,
+            Qt.AlignCenter,
+            str(count),
+        )
+
+        painter.restore()
 
 class FileExplorer(QWidget):
     """
@@ -44,9 +88,13 @@ class FileExplorer(QWidget):
         self._model.setNameFilters(["*.py", "*.txt", "*.md", "*.json", "*.cfg", "*.toml"])
         self._model.setNameFilterDisables(False)  # hide non-matching files entirely
 
+        self._error_counts = {}
+
         self._tree = QTreeView()
         self._tree.setModel(self._model)
+        self._tree.setItemDelegate(ErrorCountDelegate(self, self._tree))
         self._tree.setHeaderHidden(True)
+
         # Only the "name" column matters here; hide size/type/date columns.
         for column in (1, 2, 3):
             self._tree.hideColumn(column)
@@ -105,3 +153,12 @@ class FileExplorer(QWidget):
         path = self._model.filePath(index)
         if Path(path).is_file():
             self.file_double_clicked.emit(path)
+
+    def set_error_count(self, file_path: str, count: int) -> None:
+        """Set the number of code issues for a file."""
+        if count <= 0:
+            self._error_counts.pop(file_path, None)
+        else:
+            self._error_counts[file_path] = count
+
+        self._tree.viewport().update()

@@ -24,7 +24,7 @@ class InlineInputOutput(QPlainTextEdit):
     def stop_input(self) -> None:
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.End)
-        cursor.insertText("\n")
+        # cursor.insertText("\n")
         self.setTextCursor(cursor)
 
         self._input_start = None
