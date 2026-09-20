@@ -613,17 +613,36 @@ class MainWindow(QMainWindow):
         working_dir = self._current_folder or str(Path(self._current_file_path).parent)
 
         self.editor._check_errors()
+
         error_messages = self.editor.get_error_messages()
+
         if error_messages:
             self._output_line_tail = ""
+
             self.output_panel.clear()
             self.output_panel.stop_input()
+
             self._show_bottom_panel("output")
-            self._append_error_output("Code issues found:\n")
+
+            project_name = Path.cwd()
+
+            issue_count = len(error_messages)
+            issue_label = "problem" if issue_count == 1 else "problems"
+
+            self._append_error_output(
+                f"Code Issues  ({issue_count} {issue_label})\n"
+            )
+
+            self._append_error_output(
+                f"Project Path: {project_name}\n\n"
+            )
+
             for message in error_messages:
-                self._append_error_output(f"- {message}\n")
+                self._append_error_output(f"• {message}\n")
+
             self._set_running_controls(False)
             self.statusBar().showMessage("status: ready")
+
             return
 
         self._output_line_tail = ""
@@ -669,7 +688,7 @@ class MainWindow(QMainWindow):
         )
         output_format = QTextCharFormat()
         output_format.setForeground(
-            QColor("#ff6b6b") if error_pattern.search(text) else QColor("#00ff00")
+            QColor("#ff0000") if error_pattern.search(text) else QColor("#00ff00")
         )
         cursor.insertText(text, output_format)
         self.output_panel.setTextCursor(cursor)

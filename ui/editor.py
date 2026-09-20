@@ -190,15 +190,36 @@ class CodeEditor(QPlainTextEdit):
 
         for line, start, end in self._keyword_errors:
             block = self.document().findBlockByLineNumber(line - 1)
+
             if not block.isValid():
                 messages.append(f"Line {line}: Possible keyword typo.")
                 continue
+
             text = block.text()
             token_text = text[start:end].strip()
+
             if not token_text:
                 messages.append(f"Line {line}: Possible keyword typo.")
                 continue
-            messages.append(f"Line {line}: '{token_text}' is not valid Python. Did you mean '{text[start:end].strip()}'?")
+
+            matches = difflib.get_close_matches(
+                token_text,
+                PYTHON_KEYWORDS,
+                n=1,
+                cutoff=0.75,
+            )
+
+            if matches:
+                suggestion = matches[0]
+
+                messages.append(
+                    f"Line {line}: '{token_text}' is not valid Python. "
+                    f"Did you mean '{suggestion}'?"
+                )
+            else:
+                messages.append(
+                    f"Line {line}: '{token_text}' is not valid Python."
+                )
 
         for line, start, end in self._name_errors:
             block = self.document().findBlockByLineNumber(line - 1)
