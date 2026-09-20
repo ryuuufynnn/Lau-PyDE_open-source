@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lau-pyde"
+version = "1.0.0"
+description = "A simple and lightweight Python Development Environment"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6",
+]
+
+[project.scripts]
+pyde = "launcher:main"
+
+[tool.setuptools]
+py-modules = ["main", "launcher"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "ui*", "assets*"]
+
+[tool.setuptools.package-data]
+"assets" = ["logo.png"]
