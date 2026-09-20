@@ -18,6 +18,7 @@ class TerminalPanel(QWidget):
         super().__init__()
 
         self._working_dir = str(Path.home())
+        self._working_directory = str(Path.cwd())
 
         self._output = InlineInputOutput()
         font = QFont("Consolas")
@@ -56,8 +57,10 @@ class TerminalPanel(QWidget):
         self._process = None
         self._show_prompt()
 
-    def set_working_directory(self, folder_path: str) -> None:
-        self._working_dir = folder_path
+    def set_working_directory(self, path: str) -> None:
+        self._working_dir = path
+        self._working_directory = path
+        self._show_prompt()
 
     def _run_command(self, command: str) -> None:
         command = command.strip()
@@ -111,7 +114,7 @@ class TerminalPanel(QWidget):
             re.IGNORECASE,
         )
         format_ = QTextCharFormat()
-        format_.setForeground(QColor("#ff6b6b") if error_pattern.search(text) else QColor("#00ff00"))
+        format_.setForeground(QColor("#ff0000") if error_pattern.search(text) else QColor("#00ff00"))
         cursor = self._output.textCursor()
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(text, format_)
@@ -123,7 +126,8 @@ class TerminalPanel(QWidget):
         self._show_prompt()
 
     def _show_prompt(self) -> None:
-        current_path = Path.cwd()
+        current_path = self._working_dir
+
         cursor = self._output.textCursor()
         green_format = QTextCharFormat()
         green_format.setForeground(QColor("#00ff00"))
