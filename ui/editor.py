@@ -197,6 +197,73 @@ class CodeEditor(QPlainTextEdit):
                     )
                 )
 
+        tokens = []
+
+        try:
+            tokens = list(tokenize.generate_tokens(StringIO(code).readline))
+        except tokenize.TokenError:
+            pass
+
+        at_statement_start = True
+
+        for token in tokens:
+            if token.type == tokenize.NEWLINE:
+                at_statement_start = True
+                continue
+
+            if token.type in (tokenize.INDENT, tokenize.DEDENT):
+                continue
+
+            if at_statement_start and token.type == tokenize.NAME:
+                if token.string not in PYTHON_KEYWORDS:
+                    matches = difflib.get_close_matches(
+                        token.string,
+                        PYTHON_KEYWORDS,
+                        n=1,
+                        cutoff=0.75,
+                    )
+
+                    if matches:
+                        self._keyword_errors.append(
+                            (
+                                token.start[0],
+                                token.start[1],
+                                token.end[1],
+                            )
+                        )
+
+                at_statement_start = False
+
+        self._name_errors = []
+
+        for token in tokens:
+            if token.type != tokenize.NAME:
+                continue
+
+            if token.string in PYTHON_KEYWORDS:
+                continue
+
+            if token.string in PYTHON_BUILTINS:
+                continue
+
+            matches = difflib.get_close_matches(
+                token.string,
+                PYTHON_BUILTINS,
+                n=1,
+                cutoff=0.75,
+            )
+
+            if not matches:
+                continue
+
+            self._name_errors.append(
+                (
+                    token.start[0],
+                    token.start[1],
+                    token.end[1],
+                )
+            )
+
         try:
             tree = ast.parse(code)
         except SyntaxError as error:
@@ -300,7 +367,6 @@ class CodeEditor(QPlainTextEdit):
 
         selections.append(current_selection)
 
-        # syntax error
         # syntax errors
         for line, start, end in self._syntax_errors:
             block = self.document().findBlockByLineNumber(line - 1)
@@ -323,6 +389,58 @@ class CodeEditor(QPlainTextEdit):
                 end = max(start + 1, end - 1)
             else:
                 end = min(start + 1, len(block.text()))
+
+            cursor = QTextCursor(block)
+            cursor.setPosition(block.position() + start)
+            cursor.setPosition(
+                block.position() + end,
+                QTextCursor.KeepAnchor,
+            )
+
+            error_selection.cursor = cursor
+            selections.append(error_selection)
+
+        # keyword errors
+        for line, start, end in self._keyword_errors:
+            block = self.document().findBlockByLineNumber(line - 1)
+
+            if not block.isValid():
+                continue
+
+            error_selection = QTextEdit.ExtraSelection()
+
+            error_selection.format.setUnderlineColor(
+                QColor("#f44747")
+            )
+            error_selection.format.setUnderlineStyle(
+                QTextCharFormat.WaveUnderline
+            )
+
+            cursor = QTextCursor(block)
+            cursor.setPosition(block.position() + start)
+            cursor.setPosition(
+                block.position() + end,
+                QTextCursor.KeepAnchor,
+            )
+
+            error_selection.cursor = cursor
+            selections.append(error_selection)
+
+        # name errors
+        for line, start, end in self._name_errors:
+            block = self.document().findBlockByLineNumber(line - 1)
+
+            if not block.isValid():
+                continue
+
+            error_selection = QTextEdit.ExtraSelection()
+
+            error_selection.format.setUnderlineColor(
+                QColor("#f44747")
+            )
+            error_selection.format.setUnderlineStyle(
+                QTextCharFormat.WaveUnderline
+            )
 
             cursor = QTextCursor(block)
             cursor.setPosition(block.position() + start)
