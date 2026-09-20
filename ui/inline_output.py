@@ -24,7 +24,11 @@ class InlineInputOutput(QPlainTextEdit):
     def stop_input(self) -> None:
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.End)
-        # cursor.insertText("\n")
+
+        # conditional para if user input ang code ay magkakaroon ng \n 
+        if self._input_start is not None:
+            cursor.insertText("\n")
+
         self.setTextCursor(cursor)
 
         self._input_start = None

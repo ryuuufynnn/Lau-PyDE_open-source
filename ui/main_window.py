@@ -700,7 +700,7 @@ class MainWindow(QMainWindow):
         self.output_panel.stop_input()
         self._active_prompt = ""
         self._runner.stop()
-        self._append_output("\nCode stop running successfully.")
+        self._append_output("\n\nCode stop running successfully.")
         self.statusBar().showMessage("Killed")
 
     def _set_running_controls(self, running: bool) -> None:
@@ -751,7 +751,7 @@ class MainWindow(QMainWindow):
         self._active_prompt = ""
         self._output_line_tail = ""
         self.output_panel.stop_input()
-        self._append_output(f"Process finished with exit code {exit_code}. Thank You for using Lau-PyDE!\n")
+        self._append_output(f"\nProcess finished with exit code {exit_code}. Thank You for using Lau-PyDE!\n")
         self._set_running_controls(False)
         self.statusBar().showMessage("status: ready")
 
