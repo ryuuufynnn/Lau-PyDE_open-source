@@ -235,6 +235,17 @@ class CodeEditor(QPlainTextEdit):
 
         return messages
 
+    def _error_line_numbers(self) -> set[int]:
+        """Return all line numbers that currently have a detected error."""
+        error_lines: set[int] = set()
+        for line, _, _ in self._syntax_errors:
+            error_lines.add(line)
+        for line, _, _ in self._keyword_errors:
+            error_lines.add(line)
+        for line, _, _ in self._name_errors:
+            error_lines.add(line)
+        return error_lines
+
     def _collect_defined_names(self, tree: ast.AST) -> set[str]:
         """Collect names that are actually defined in the code so we do not
         flag valid variables as misspellings or undefined names."""
@@ -421,6 +432,7 @@ class CodeEditor(QPlainTextEdit):
                     self._name_errors.append(item)
                     seen_name.add(item)
         self._highlight_current_line()
+        self._line_number_area.update()
 
     # line number gutter
     def line_number_area_width(self) -> int:
@@ -453,13 +465,15 @@ class CodeEditor(QPlainTextEdit):
         block_number = block.blockNumber()
         top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
         bottom = top + self.blockBoundingRect(block).height()
+        error_lines = self._error_line_numbers()
 
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
-                painter.setPen(QColor("#858585"))
+                line_number = block_number + 1
+                painter.setPen(QColor("#f44747" if line_number in error_lines else "#858585"))
                 painter.drawText(
                     0, int(top), self._line_number_area.width() - 6, self.fontMetrics().height(),
-                    Qt.AlignRight, str(block_number + 1),
+                    Qt.AlignRight, str(line_number),
                 )
             block = block.next()
             top = bottom
@@ -570,6 +584,7 @@ class CodeEditor(QPlainTextEdit):
             selections.append(error_selection)
 
         self.setExtraSelections(selections)
+        self._line_number_area.update()
 
     # auto indentation
     def keyPressEvent(self, event) -> None:

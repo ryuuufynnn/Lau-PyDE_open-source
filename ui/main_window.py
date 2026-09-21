@@ -946,15 +946,13 @@ class MainWindow(QMainWindow):
 
     # pane layout
     def _minimize_bottom_panel(self) -> None:
-        self._restore_layout()
         self._bottom_minimized = True
-        self._bottom_tabs.hide()
+        self._restore_layout()
         self.statusBar().showMessage("Output and terminal minimized. Use View to show them.")
 
     def _minimize_explorer(self) -> None:
-        self._restore_layout()
         self._explorer_minimized = True
-        self.explorer.hide()
+        self._restore_layout()
         self.statusBar().showMessage("Explorer minimized. Use View to show it.")
 
     def _maximize_pane(self, pane: str) -> None:
@@ -999,7 +997,8 @@ class MainWindow(QMainWindow):
         self._editor_and_output.setVisible(True)
 
         self.explorer.setVisible(not self._explorer_minimized)
-        self.explorer.show()
+        # Respect the minimized flag; `setVisible` controls whether
+        # the explorer is shown. Do not force-show here.
 
         self._bottom_tabs.show()
         self._bottom_tabs.setVisible(not self._bottom_minimized)

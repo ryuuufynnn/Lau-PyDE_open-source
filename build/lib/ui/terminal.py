@@ -25,6 +25,7 @@ class TerminalPanel(QWidget):
         font.setStyleHint(QFont.Monospace)
         self._output.setFont(font)
         self._output.input_submitted.connect(self._run_command)
+        self._output.interrupt_requested.connect(self.stop)
 
         title_bar = QWidget()
         title_bar_layout = QHBoxLayout(title_bar)
@@ -82,6 +83,7 @@ class TerminalPanel(QWidget):
             return
 
         self._process = QProcess()
+        self._output.set_interrupt_enabled(True)
         self._process.setWorkingDirectory(self._working_dir)
         # Merge stdout and stderr so error output shows up too.
         self._process.setProcessChannelMode(QProcess.MergedChannels)
@@ -121,6 +123,7 @@ class TerminalPanel(QWidget):
         self._output.setTextCursor(cursor)
 
     def _handle_finished(self, _exit_code: int, _exit_status) -> None:
+        self._output.set_interrupt_enabled(False)
         self._output.appendPlainText("")
         self._process = None
         self._show_prompt()
