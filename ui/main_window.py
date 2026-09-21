@@ -1,6 +1,8 @@
 from pathlib import Path
 import json
+import os
 import re
+import sys
 from typing import Optional
 
 from PySide6.QtCore import Qt
@@ -8,6 +10,7 @@ from PySide6.QtGui import QAction, QKeySequence, QTextCursor, QTextCharFormat, Q
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -100,6 +103,7 @@ class MainWindow(QMainWindow):
         self._maximized_pane: Optional[str] = None
         self._explorer_minimized = False
         self._bottom_minimized = False
+        self._project_root_permission_granted = False
 
         self.resize(1200, 800)
 
@@ -334,6 +338,11 @@ class MainWindow(QMainWindow):
         new_action.triggered.connect(self.new_file)
         file_menu.addAction(new_action)
 
+        new_folder_action = QAction("New Folder", self)
+        new_folder_action.setShortcut(QKeySequence("Ctrl+Shift+N"))
+        new_folder_action.triggered.connect(self.new_folder)
+        file_menu.addAction(new_folder_action)
+
         open_action = QAction("Open File...", self)
         open_action.setShortcut(QKeySequence("Ctrl+O"))
         open_action.triggered.connect(self.open_file_dialog)
@@ -460,16 +469,195 @@ class MainWindow(QMainWindow):
         terminal_menu.addAction(focus_terminal_action)
 
     # file operations
+    def _project_root(self) -> Path:
+        return Path.home() / "Lau-PyDE_Projects"
+
+    def _ensure_project_root(self) -> bool:
+        root = self._project_root()
+
+        if root.exists():
+            return True
+
+        if self._project_root_permission_granted:
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+                return True
+            except OSError as error:
+                QMessageBox.critical(
+                    self,
+                    APP_NAME,
+                    f"Lau-PyDE cannot create the project folder at:\n{root}\n\n{error}\n\nPlease choose a different writable location.",
+                )
+                return False
+
+        choice = QMessageBox.question(
+            self,
+            APP_NAME,
+            f"Lau-PyDE wants to create a project folder in your home directory:\n{root}\n\nAllow it?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+
+        if choice != QMessageBox.Yes:
+            folder = QFileDialog.getExistingDirectory(
+                self,
+                "Choose a writable project folder",
+                str(Path.home()),
+            )
+            if not folder:
+                return False
+            self._current_folder = folder
+            self.explorer.set_root_folder(folder)
+            self.terminal_panel.set_working_directory(folder)
+            return True
+
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            self._project_root_permission_granted = True
+            return True
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                APP_NAME,
+                f"Permission denied while creating the project folder:\n{root}\n\n{error}\n\nPlease choose a different writable location.",
+            )
+            return False
+
     def new_file(self) -> None:
         if not self._confirm_discard_changes():
             return
 
+        default_dir = Path(self._current_folder) if self._current_folder else Path.home()
+        if not default_dir.exists():
+            default_dir = Path.home()
+
+        file_name, ok = QInputDialog.getText(
+            self,
+            "New File",
+            "File name (.py):",
+            text="untitled.py",
+        )
+
+        if not ok:
+            return
+
+        clean_name = (file_name or "untitled.py").strip()
+        if not clean_name:
+            clean_name = "untitled.py"
+        if not clean_name.endswith(".py"):
+            clean_name = f"{clean_name}.py"
+
+        target_path = default_dir / clean_name
+        if target_path.exists():
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                f"A file named '{clean_name}' already exists at:\n{target_path}",
+            )
+            return
+
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text("", encoding="utf-8")
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                APP_NAME,
+                f"Could not create file:\n{target_path}\n\n{error}",
+            )
+            return
+
         self.editor.clear()
         self._show_editor()
-        self._current_file_path = None
+        self._current_file_path = str(target_path)
         self.editor.document().setModified(False)
         self._update_title()
-        self.statusBar().showMessage("New file")
+        self.statusBar().showMessage(f"New file: {target_path}")
+
+    def new_folder(self) -> None:
+        """Create a project folder in the home-directory Lau-PyDE_Projects root."""
+        if not self._ensure_project_root():
+            return
+
+        root = self._project_root()
+        project_name, ok = QInputDialog.getText(
+            self,
+            "New Project Folder",
+            "Project name:",
+            text="",
+        )
+
+        if not ok or not project_name.strip():
+            return
+
+        clean_name = project_name.strip().strip("/\\")
+        if not clean_name:
+            return
+
+        folder = root / clean_name
+        if folder.exists():
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                f"A project folder named '{clean_name}' already exists at:\n{folder}",
+            )
+            return
+
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                APP_NAME,
+                f"Could not create project folder:\n{folder}\n\n{error}",
+            )
+            return
+
+        self._current_folder = str(folder)
+        self.explorer.set_root_folder(str(folder))
+        self.terminal_panel.set_working_directory(str(folder))
+        RECENT_PROJECT_FILE.write_text(json.dumps({"project": str(folder)}))
+
+        create_file_choice = QMessageBox.question(
+            self,
+            APP_NAME,
+            f"Project folder created at:\n{folder}\n\nCreate a starter .py file in it now?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+
+        if create_file_choice == QMessageBox.Yes:
+            starter_name, starter_ok = QInputDialog.getText(
+                self,
+                "Starter Python File",
+                "File name (.py):",
+                text="main.py",
+            )
+            if starter_ok:
+                file_name = (starter_name or "main.py").strip()
+                if not file_name:
+                    file_name = "main.py"
+                if not file_name.endswith(".py"):
+                    file_name = f"{file_name}.py"
+                file_path = folder / file_name
+                try:
+                    file_path.write_text("", encoding="utf-8")
+                except OSError as error:
+                    QMessageBox.critical(
+                        self,
+                        APP_NAME,
+                        f"Could not create starter file:\n{file_path}\n\n{error}",
+                    )
+                    return
+                self._current_file_path = str(file_path)
+                self.editor.setPlainText("")
+                self.editor.document().setModified(False)
+                self._show_editor()
+                self._update_title()
+                self.statusBar().showMessage(f"Project folder opened: {folder}")
+                return
+
+        self._show_editor()
+        self._update_title()
+        self.statusBar().showMessage(f"Project folder opened: {folder}")
 
     def open_file_dialog(self) -> None:
         if not self._confirm_discard_changes():
