@@ -10,7 +10,18 @@ from ui.main_window import DARK_STYLESHEET, MainWindow
 
 PENGUIN_NAME = "Sissa"
 
+def set_windows_app_id() -> None:
+    if sys.platform != "win32":
+        return
+
+    import ctypes
+
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+        "com.laurence.Lau-PyDE"
+    )
+
 def main():
+    set_windows_app_id()
     app = QApplication(sys.argv)
     # Prefer package resource lookup (works for installed package),
     # fall back to a filesystem path for source-tree runs.
