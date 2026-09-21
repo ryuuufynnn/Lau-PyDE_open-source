@@ -446,6 +446,7 @@ class MainWindow(QMainWindow):
 
         restore_layout_action = QAction("Restore Layout", self)
         restore_layout_action.triggered.connect(self._restore_layout)
+        restore_layout_action.setShortcut(QKeySequence("Ctrl+0"))
         view_menu.addAction(restore_layout_action)
 
         # for loop for pointing hand cursor
@@ -988,14 +989,23 @@ class MainWindow(QMainWindow):
 
     def _restore_layout(self) -> None:
         self._maximized_pane = None
-        self._editor_and_output.show()
+
+        self._editor_stack.setCurrentWidget(self._editor_container)
+        self._editor_container.show()
         self.editor.show()
+        self._editor_and_output.show()
+        self._editor_and_output.setVisible(True)
+
         self.explorer.setVisible(not self._explorer_minimized)
         self._bottom_tabs.setVisible(not self._bottom_minimized)
         self._bottom_tabs.tabBar().show()
+
         self._main_splitter.setSizes([220, max(1, self.width() - 220)])
+
         if not self._bottom_minimized:
             self._editor_and_output.setSizes([max(1, self.height() - 260), 260])
+        else:
+            self._editor_and_output.setSizes([max(1, self.height() - 40), 40])
 
     def _show_explorer(self) -> None:
         self._restore_layout()
