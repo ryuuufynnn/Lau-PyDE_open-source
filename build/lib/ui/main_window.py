@@ -801,6 +801,8 @@ class MainWindow(QMainWindow):
     def _restore_layout(self) -> None:
         self._maximized_pane = None
 
+        self._main_splitter.show()
+        self._editor_stack.show()
         self._editor_stack.setCurrentWidget(self._editor_container)
         self._editor_container.show()
         self.editor.show()
@@ -808,6 +810,9 @@ class MainWindow(QMainWindow):
         self._editor_and_output.setVisible(True)
 
         self.explorer.setVisible(not self._explorer_minimized)
+        self.explorer.show()
+
+        self._bottom_tabs.show()
         self._bottom_tabs.setVisible(not self._bottom_minimized)
         self._bottom_tabs.tabBar().show()
 
