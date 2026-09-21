@@ -6,9 +6,11 @@ class InlineInputOutput(QPlainTextEdit):
     """Output view that accepts one answer directly after a program prompt."""
 
     input_submitted = Signal(str)
+    interrupt_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
+        self._interrupt_enabled = False
         self._input_start: int | None = None
         self.setReadOnly(True)
 
@@ -49,6 +51,14 @@ class InlineInputOutput(QPlainTextEdit):
         return cursor.selectedText().replace("\u2029", "\n")
 
     def keyPressEvent(self, event) -> None:
+
+        if (event.key() == Qt.Key_C
+        and event.modifiers() & Qt.ControlModifier):
+            
+            if self._interrupt_enabled:
+                self.interrupt_requested.emit()
+                return
+
         if self._input_start is None:
             super().keyPressEvent(event)
             return
@@ -81,6 +91,10 @@ class InlineInputOutput(QPlainTextEdit):
             self.setTextCursor(cursor)
             return
 
+        # if key == Qt.Key_C and event.modifiers() & Qt.ControlModifier:
+        #     self.interrupt_requested.emmit()
+        #     return
+
         # The program's output is protected. If the user clicked in it,
         # continue editing at the active prompt instead.
         if selection_start < self._input_start:
@@ -96,3 +110,6 @@ class InlineInputOutput(QPlainTextEdit):
         super().mousePressEvent(event)
         if self.textCursor().position() < self._input_start:
             self._move_to_input_end()
+
+    def set_interrupt_enabled(self, enabled: bool) -> None:
+        self._interrupt_enabled = enabled
