@@ -10,10 +10,15 @@ and nothing outside the opened folder is ever touched.
 """
 
 from pathlib import Path
+import os
+import sys
+import shutil
+import subprocess
 
-from PySide6.QtCore import Signal, Qt, QModelIndex, QDir
-from PySide6.QtGui import QColor, QPainter 
+from PySide6.QtCore import Signal, Qt, QModelIndex, QDir, QUrl
+from PySide6.QtGui import QColor, QPainter, QAction
 from PySide6.QtWidgets import (
+    QApplication,
     QFileSystemModel,
     QHBoxLayout,
     QLabel,
@@ -22,6 +27,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QStyledItemDelegate,
+    QMenu,
+    QInputDialog,
+    QMessageBox,
+    QFileDialog,
 )
 
 class ErrorCountDelegate(QStyledItemDelegate):
@@ -141,6 +150,10 @@ class FileExplorer(QWidget):
         layout.addWidget(self._tree)
         layout.addStretch()
 
+        # context menu for file actions
+        self._tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._on_context_menu)
+
     def set_root_folder(self, folder_path: str | None) -> None:
         """Point the explorer at a new project folder."""
 
@@ -157,6 +170,114 @@ class FileExplorer(QWidget):
         path = self._model.filePath(index)
         if Path(path).is_file():
             self.file_double_clicked.emit(path)
+
+    def _on_context_menu(self, pos) -> None:
+        index = self._tree.indexAt(pos)
+        if not index.isValid():
+            return
+
+        path = self._model.filePath(index)
+
+        menu = QMenu(self)
+
+        if Path(path).is_dir():
+            new_file = QAction('New File', self)
+            new_file.triggered.connect(lambda: self._create_file(path))
+            menu.addAction(new_file)
+
+            new_folder = QAction('New Folder', self)
+            new_folder.triggered.connect(lambda: self._create_folder(path))
+            menu.addAction(new_folder)
+
+        rename = QAction('Rename', self)
+        rename.triggered.connect(lambda: self._rename(path))
+        menu.addAction(rename)
+
+        delete = QAction('Delete', self)
+        delete.triggered.connect(lambda: self._delete(path))
+        menu.addAction(delete)
+
+        menu.addSeparator()
+
+        copy_path = QAction('Copy Path', self)
+        copy_path.triggered.connect(lambda: self._copy_path(path))
+        menu.addAction(copy_path)
+
+        reveal = QAction('Reveal in File Manager', self)
+        reveal.triggered.connect(lambda: self._reveal(path))
+        menu.addAction(reveal)
+
+        menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    def _create_file(self, folder_path: str) -> None:
+        name, ok = QInputDialog.getText(self, 'New File', 'File name:')
+        if not ok or not name.strip():
+            return
+        target = Path(folder_path) / name
+        try:
+            target.write_text('', encoding='utf-8')
+        except OSError as e:
+            QMessageBox.critical(self, 'Error', f'Could not create file:\n{e}')
+            return
+        # refresh
+        self._model.directoryLoaded.emit(str(folder_path))
+
+    def _create_folder(self, folder_path: str) -> None:
+        name, ok = QInputDialog.getText(self, 'New Folder', 'Folder name:')
+        if not ok or not name.strip():
+            return
+        target = Path(folder_path) / name
+        try:
+            target.mkdir(parents=True, exist_ok=False)
+        except OSError as e:
+            QMessageBox.critical(self, 'Error', f'Could not create folder:\n{e}')
+            return
+        self._model.directoryLoaded.emit(str(folder_path))
+
+    def _rename(self, path: str) -> None:
+        p = Path(path)
+        new_name, ok = QInputDialog.getText(self, 'Rename', 'New name:', text=p.name)
+        if not ok or not new_name.strip():
+            return
+        target = p.with_name(new_name)
+        try:
+            p.rename(target)
+        except OSError as e:
+            QMessageBox.critical(self, 'Error', f'Could not rename:\n{e}')
+            return
+        parent = str(p.parent)
+        self._model.directoryLoaded.emit(parent)
+
+    def _delete(self, path: str) -> None:
+        p = Path(path)
+        choice = QMessageBox.question(self, 'Delete', f'Are you sure you want to delete {p}?', QMessageBox.Yes | QMessageBox.No)
+        if choice != QMessageBox.Yes:
+            return
+        try:
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+        except OSError as e:
+            QMessageBox.critical(self, 'Error', f'Could not delete:\n{e}')
+            return
+        self._model.directoryLoaded.emit(str(p.parent))
+
+    def _copy_path(self, path: str) -> None:
+        clipboard = QApplication.clipboard()
+        clipboard.setText(path)
+
+    def _reveal(self, path: str) -> None:
+        # Try platform-appropriate reveal
+        try:
+            if os.name == 'nt':
+                subprocess.run(['explorer', '/select,', path])
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', '-R', path])
+            else:
+                subprocess.run(['xdg-open', Path(path).parent])
+        except Exception:
+            QMessageBox.information(self, 'Reveal', f'Could not open file manager for {path}')
 
     def set_error_count(self, file_path: str, count: int) -> None:
         """Set the number of code issues for a file."""
