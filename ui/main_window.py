@@ -7,7 +7,8 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction, QKeySequence, QTextCursor, QTextCharFormat, QColor
+from PySide6.QtGui import QAction, QKeySequence, QTextCursor, QTextCharFormat, QColor, QTextCharFormat as _QTextCharFormat
+from PySide6.QtWidgets import QTextEdit
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -18,11 +19,14 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QLineEdit,
     QTabWidget,
     QVBoxLayout,
     QWidget,
     QStackedWidget,
+    
 )
+from PySide6.QtGui import QShortcut
 
 from core.file_manager import read_file, write_file
 from core.file_manager import (
@@ -157,11 +161,34 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
         header_layout.addWidget(self._error_badge)
 
+        # lightweight in-editor search bar (hidden by default)
+        self._search_bar = QWidget()
+        sb_layout = QHBoxLayout(self._search_bar)
+        sb_layout.setContentsMargins(6, 4, 6, 4)
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Find in file (Ctrl+F)")
+        self._search_prev = QPushButton("▲")
+        self._search_next = QPushButton("▼")
+        self._search_count = QLabel("")
+        self._search_close = QPushButton("✕")
+        for w in (self._search_prev, self._search_next, self._search_close):
+            w.setFixedWidth(28)
+            w.setCursor(Qt.PointingHandCursor)
+            w.setStyleSheet("border: none;")
+
+        sb_layout.addWidget(self._search_input)
+        sb_layout.addWidget(self._search_prev)
+        sb_layout.addWidget(self._search_next)
+        sb_layout.addWidget(self._search_count)
+        sb_layout.addWidget(self._search_close)
+        self._search_bar.hide()
+
         self._editor_container = QWidget()
         editor_container_layout = QVBoxLayout(self._editor_container)
         editor_container_layout.setContentsMargins(0, 0, 0, 0)
         editor_container_layout.setSpacing(0)
         editor_container_layout.addWidget(editor_header)
+        editor_container_layout.addWidget(self._search_bar)
         editor_container_layout.addWidget(self.editor)
 
         # starting code for the welcome message
@@ -239,6 +266,21 @@ class MainWindow(QMainWindow):
         # self.explorer.file_double_clicked.connect(self.open_file)
         self.explorer = FileExplorer()
         self.explorer.set_root_folder(None)
+
+        # connect search controls
+        self._search_input.textChanged.connect(self._on_search_text_changed)
+        self._search_prev.clicked.connect(lambda: self._search_move(-1))
+        self._search_next.clicked.connect(lambda: self._search_move(1))
+        self._search_close.clicked.connect(self._close_search)
+        # Ctrl+F shortcut
+        try:
+            QShortcut(QKeySequence("Ctrl+F"), self, activated=self._open_search)
+        except Exception:
+            pass
+
+        # internal search state
+        self._search_matches: list[QTextCursor] = []
+        self._search_index: int = -1
 
         self.load_recent_project()
         self.explorer.file_double_clicked.connect(self.open_file)
@@ -370,6 +412,76 @@ class MainWindow(QMainWindow):
         self._main_splitter = main_splitter
 
         self.setCentralWidget(main_splitter)
+
+    # Search helpers
+    def _open_search(self) -> None:
+        self._search_bar.show()
+        self._search_input.setFocus()
+
+    def _close_search(self) -> None:
+        self._search_bar.hide()
+        self._search_input.clear()
+        self._clear_search_highlights()
+
+    def _on_search_text_changed(self, text: str) -> None:
+        self._find_all_in_editor(text)
+
+    def _find_all_in_editor(self, pattern: str) -> None:
+        self._clear_search_highlights()
+        if not pattern:
+            self._search_count.setText("")
+            return
+
+        doc = self.editor.document()
+        cursor = doc.find(pattern)
+        matches = []
+        while not cursor.isNull():
+            # clone the cursor
+            c = QTextCursor(cursor)
+            matches.append(c)
+            cursor = doc.find(pattern, cursor)
+
+        self._search_matches = matches
+        self._search_index = 0 if matches else -1
+        self._search_count.setText(f"{len(matches)}")
+        # highlight all matches and select the first
+        for c in matches:
+            self._highlight_range(c.selectionStart(), c.selectionEnd())
+
+        if matches:
+            self._select_search_index(0)
+
+    def _highlight_range(self, start: int, end: int) -> None:
+        extra = QTextEdit.ExtraSelection()
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("#44475a"))
+        extra.format = fmt
+        cur = self.editor.textCursor()
+        cur.setPosition(start)
+        cur.setPosition(end, QTextCursor.KeepAnchor)
+        extra.cursor = cur
+        sels = self.editor.extraSelections()
+        sels.append(extra)
+        self.editor.setExtraSelections(sels)
+
+    def _clear_search_highlights(self) -> None:
+        self.editor.setExtraSelections([])
+
+    def _select_search_index(self, idx: int) -> None:
+        if not self._search_matches:
+            return
+        idx = idx % len(self._search_matches)
+        self._search_index = idx
+        cur = self._search_matches[idx]
+        self.editor.setTextCursor(cur)
+        # ensure visible
+        self.editor.centerCursor()
+
+    def _search_move(self, delta: int) -> None:
+        if not self._search_matches:
+            return
+        self._search_index = (self._search_index + delta) % len(self._search_matches)
+        self._select_search_index(self._search_index)
 
     def _build_menu_and_shortcuts(self) -> None:
         """
