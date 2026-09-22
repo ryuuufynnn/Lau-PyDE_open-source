@@ -131,6 +131,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
         self._update_title()
 
+        # persistent status label (restore bottom status bar)
+        self._setup_statusbar()
+
     # main setup
     def _build_widgets(self) -> None:
         self.editor = CodeEditor()
@@ -1065,6 +1068,27 @@ class MainWindow(QMainWindow):
 
     def _show_editor(self) -> None:
         self._editor_stack.setCurrentWidget(self._editor_container)
+
+    def _setup_statusbar(self) -> None:
+        """Create a persistent status label and connect it to status bar messages."""
+        try:
+            self._status_label = QLabel("Status: Ready")
+            self.statusBar().addPermanentWidget(self._status_label)
+            self.statusBar().messageChanged.connect(self._on_statusbar_message_changed)
+        except Exception:
+            pass
+
+    def _on_statusbar_message_changed(self, msg: str) -> None:
+        if not msg:
+            disp = "Ready"
+        else:
+            disp = msg
+            if isinstance(disp, str) and disp.lower().startswith("status:"):
+                disp = disp.split(":", 1)[1].strip()
+        try:
+            self._status_label.setText(f"Status: {disp}")
+        except Exception:
+            pass
 
     def _open_search(self) -> None:
         self._search_bar.show()
