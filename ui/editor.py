@@ -2,7 +2,7 @@ import ast
 import difflib
 import tokenize
 from io import StringIO
-from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt
+from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -140,6 +140,8 @@ class LineNumberArea(QWidget):
 
 
 class CodeEditor(QPlainTextEdit):
+    # notify listeners when diagnostics/count changes: emits int (total issues)
+    diagnostics_changed = Signal(int)
     """
     The main code-editing widget.
 
@@ -182,7 +184,11 @@ class CodeEditor(QPlainTextEdit):
         self._highlight_current_line()
 
         self._highlighter = PythonHighlighter(self.document())
-        self.textChanged.connect(self._check_errors)
+        # connect textChanged after setting up completion model to avoid
+        # running _check_errors before instance attributes are initialized
+
+        # track last emitted diagnostics count to avoid noisy emissions
+        self._last_diag_count = -1
 
         # lightweight completion: keywords, builtins, and user-defined names
         self._completion_model = QStringListModel()
@@ -190,6 +196,9 @@ class CodeEditor(QPlainTextEdit):
         self._completer.setWidget(self)
         self._completer.setCompletionMode(QCompleter.PopupCompletion)
         self._completer.setCaseSensitivity(Qt.CaseInsensitive)
+
+        # now safe to connect textChanged
+        self.textChanged.connect(self._check_errors)
 
     def get_error_messages(self) -> list[str]:
         """Return human-readable error messages for all current issues."""
@@ -558,6 +567,18 @@ class CodeEditor(QPlainTextEdit):
                     seen_name.add(item)
         self._highlight_current_line()
         self._line_number_area.update()
+        # compute diagnostics count and emit signal if changed
+        try:
+            diag_count = len(self._syntax_errors) + len(self._keyword_errors) + len(self._name_errors)
+            if diag_count != self._last_diag_count:
+                self._last_diag_count = diag_count
+                try:
+                    self.diagnostics_changed.emit(diag_count)
+                except Exception:
+                    # be resilient if no listeners or signal unavailable
+                    pass
+        except Exception:
+            pass
 
     def _word_under_cursor(self) -> str:
         cursor = self.textCursor()

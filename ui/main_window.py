@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
         self.editor = CodeEditor()
         self.editor.document().modificationChanged.connect(self._on_modification_changed)
 
+        # connect diagnostics_changed signal to update explorer error badge
         try:
             self.editor.diagnostics_changed.connect(self._on_diagnostics_changed)
         except Exception:
@@ -259,6 +260,36 @@ class MainWindow(QMainWindow):
         self._runner = PythonRunner()
         self._runner.output_ready.connect(self._append_output)
         self._runner.finished.connect(self._on_run_finished)
+
+    def _on_diagnostics_changed(self, count: int) -> None:
+        """Handle diagnostics_changed signals from the editor by updating
+        the explorer's error count for the currently open file and the UI."""
+        try:
+            if not self._current_file_path:
+                return
+
+            # update explorer badge/count
+            try:
+                self.explorer.set_error_count(self._current_file_path, count)
+            except Exception:
+                pass
+
+            # update small error badge in editor header and window title
+            try:
+                if count:
+                    self._error_badge.setText(f"Errors: {count}")
+                else:
+                    self._error_badge.setText("")
+            except Exception:
+                pass
+
+            # refresh title/status
+            try:
+                self._update_title()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def send_input(self, text: str) -> None:
         if not self._runner.is_running():
@@ -490,6 +521,22 @@ class MainWindow(QMainWindow):
         focus_terminal_action.triggered.connect(self._focus_terminal)
         terminal_menu.addAction(focus_terminal_action)
 
+        # Git actions (Feature 9): interactive push which may prompt for credentials
+        git_menu = menu_bar.addMenu("&Git")
+
+        git_push_action = QAction("Push (git)", self)
+        git_push_action.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        git_push_action.triggered.connect(self._git_push)
+        git_menu.addAction(git_push_action)
+
+        # help menu / updater
+        help_menu = menu_bar.addMenu("&Help")
+
+        update_action = QAction("Update Lau-PyDE", self)
+        update_action.setShortcut(QKeySequence("Ctrl+U"))
+        update_action.triggered.connect(self._update_lau_pyde)
+        help_menu.addAction(update_action)
+
     # file operations
     def _project_root(self) -> Path:
         return Path.home() / "Lau-PyDE_Projects"
@@ -704,6 +751,13 @@ class MainWindow(QMainWindow):
         self.editor.setPlainText(content)
         self._current_file_path = path
         self.editor.document().setModified(False)
+
+        # reveal the file in the explorer tree
+        try:
+            if hasattr(self, 'explorer'):
+                self.explorer.reveal_path(path)
+        except Exception:
+            pass
 
         if self._current_folder:
             RECENT_PROJECT_FILE.write_text(
@@ -1051,6 +1105,43 @@ class MainWindow(QMainWindow):
             write_recovery(self._current_file_path, self.editor.toPlainText())
         except Exception:
             pass
+
+    def _git_push(self) -> None:
+        """Run `git push` in the current project folder using the terminal.
+
+        This opens the terminal panel and runs `git push`. The terminal is
+        already wired to allow interactive stdin so credential prompts will
+        be handled by the inline terminal input.
+        """
+        folder = self._current_folder or (Path(self._current_file_path).parent if self._current_file_path else None)
+        if not folder:
+            QMessageBox.information(self, APP_NAME, "Open a project folder or file first to run git push.")
+            return
+
+        self._show_bottom_panel("terminal")
+        try:
+            # ensure terminal working directory and start the command
+            self.terminal_panel.set_working_directory(str(folder))
+            # start git push; the TerminalPanel will run bash -c 'git push'
+            self.terminal_panel._run_command("git push")
+        except Exception as e:
+            QMessageBox.critical(self, APP_NAME, f"Could not start git push:\n{e}")
+
+    def _update_lau_pyde(self) -> None:
+        """Attempt to update the Lau-PyDE source by pulling from the git
+        remote. This runs `git pull --rebase` in the project root and
+        shows output in the terminal panel. This is intentionally a
+        simple helper — network failures, detached HEAD, or diverging
+        histories are shown to the user but not auto-resolved.
+        """
+        # prefer current folder; fall back to repo root of this file
+        folder = self._current_folder or str(Path(__file__).resolve().parent.parent)
+        self._show_bottom_panel("terminal")
+        try:
+            self.terminal_panel.set_working_directory(str(folder))
+            self.terminal_panel._run_command("git pull --rebase")
+        except Exception as e:
+            QMessageBox.critical(self, APP_NAME, f"Could not start update:\n{e}")
 
     def _check_startup_recovery(self) -> None:
         recs = list_recoveries()

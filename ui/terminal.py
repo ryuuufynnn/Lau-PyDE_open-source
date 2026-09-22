@@ -24,7 +24,9 @@ class TerminalPanel(QWidget):
         font = QFont("Consolas")
         font.setStyleHint(QFont.Monospace)
         self._output.setFont(font)
-        self._output.input_submitted.connect(self._run_command)
+        # route submitted input to a handler that either writes to a
+        # running process stdin or starts a new command
+        self._output.input_submitted.connect(self._on_input_submitted)
         self._output.interrupt_requested.connect(self.stop)
 
         title_bar = QWidget()
@@ -93,6 +95,27 @@ class TerminalPanel(QWidget):
         # running through the system shell (bash) means pipes, quotes,
         # and things like `pip --version` behave as the user expects.
         self._process.start("bash", ["-c", command])
+
+    def _on_input_submitted(self, text: str) -> None:
+        """Handle input submitted by the inline prompt.
+
+        If a process is running, send the input to its stdin. Otherwise,
+        treat the input as a new shell command.
+        """
+        if self._process is not None and self._process.state() != QProcess.NotRunning:
+            try:
+                data = (text + "\n").encode("utf-8")
+                self._process.write(data)
+                # ensure data is flushed where possible
+                try:
+                    self._process.waitForBytesWritten(100)
+                except Exception:
+                    pass
+            except Exception:
+                # fallback: if writing fails, show it as a new command
+                self._run_command(text)
+        else:
+            self._run_command(text)
 
     def stop(self) -> None:
         """Kill the current shell command, if one is still running."""

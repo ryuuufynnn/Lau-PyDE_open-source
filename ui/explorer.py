@@ -156,20 +156,90 @@ class FileExplorer(QWidget):
 
     def set_root_folder(self, folder_path: str | None) -> None:
         """Point the explorer at a new project folder."""
-
-        # if walang naka open na folder dapat walang path
+        # if no folder is open, hide the tree
         if not folder_path:
             self._tree.hide()
             return
-        
-        root_index = self._model.setRootPath(folder_path)
-        self._tree.setRootIndex(root_index)
-        self._tree.show()
+
+        p = Path(folder_path)
+        parent = p.parent
+
+        # If parent exists and is different, set the model root to the parent
+        # so the chosen folder appears as a visible child (expand/collapse).
+        try:
+            if parent.exists() and str(parent) != str(p):
+                root_index = self._model.setRootPath(str(parent))
+                self._tree.setRootIndex(root_index)
+                # expand and select the folder node
+                folder_idx = self._model.index(str(p))
+                if folder_idx.isValid():
+                    self._tree.expand(folder_idx)
+                    self._tree.setCurrentIndex(folder_idx)
+            else:
+                # fallback: set the model root directly to the folder
+                root_index = self._model.setRootPath(str(p))
+                self._tree.setRootIndex(root_index)
+
+            self._tree.show()
+        except Exception:
+            # last-resort fallback
+            root_index = self._model.setRootPath(folder_path)
+            self._tree.setRootIndex(root_index)
+            self._tree.show()
 
     def _on_double_clicked(self, index) -> None:
         path = self._model.filePath(index)
         if Path(path).is_file():
             self.file_double_clicked.emit(path)
+
+    def reveal_path(self, file_path: str) -> None:
+        """Ensure the file's folder is the explorer root and select the file."""
+        p = Path(file_path)
+        if not p.exists():
+            return
+
+        folder = str(p.parent)
+        # Reset the model root to the file's parent so it is visible
+        try:
+            root_index = self._model.setRootPath(folder)
+            self._tree.setRootIndex(root_index)
+        except Exception:
+            # fallback to the helper which also hides/shows the tree
+            try:
+                self.set_root_folder(folder)
+            except Exception:
+                pass
+
+        # find the index for the file and select it
+        idx = self._model.index(str(p))
+        if not idx.isValid():
+            # sometimes index creation depends on the view root; try using the parent index
+            parent_idx = self._model.index(folder)
+            if parent_idx.isValid():
+                # look for a matching child by name
+                name = p.name
+                for row in range(self._model.rowCount(parent_idx)):
+                    child = self._model.index(row, 0, parent_idx)
+                    if self._model.fileName(child) == name:
+                        idx = child
+                        break
+
+        if idx.isValid():
+            # expand parent chain so the item is visible
+            parent = idx.parent()
+            parents = []
+            while parent.isValid():
+                parents.append(parent)
+                parent = parent.parent()
+
+            for pidx in reversed(parents):
+                try:
+                    self._tree.expand(pidx)
+                except Exception:
+                    pass
+
+            self._tree.setCurrentIndex(idx)
+            self._tree.scrollTo(idx)
 
     def _on_context_menu(self, pos) -> None:
         index = self._tree.indexAt(pos)
