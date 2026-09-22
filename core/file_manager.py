@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import json
 import hashlib
 import time
@@ -14,17 +15,12 @@ def write_file(path: str, content: str) -> str:
 
 
 def _recovery_dir() -> Path:
-    """Return the path to the recovery folder, creating it if needed."""
     path = Path.home() / ".lau_pyde_recovery"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def write_recovery(original_path: str | None, content: str) -> str:
-    """Write a recovery copy for the given original path (may be None).
-
-    Returns a key string identifying the recovery file.
-    """
     key_source = (original_path or "<unsaved>") + "::" + str(time.time())
     key = hashlib.sha1(key_source.encode("utf-8")).hexdigest()
     d = _recovery_dir()
@@ -42,7 +38,6 @@ def write_recovery(original_path: str | None, content: str) -> str:
 
 
 def list_recoveries() -> list[dict]:
-    """Return a list of recovery metadata dictionaries (may be empty)."""
     d = _recovery_dir()
     items: list[dict] = []
     for p in d.glob("*.json"):
@@ -50,15 +45,12 @@ def list_recoveries() -> list[dict]:
             data = json.loads(p.read_text(encoding="utf-8"))
             items.append(data)
         except Exception:
-            # ignore corrupt metadata
             continue
-    # sort by timestamp (newest first)
     items.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
     return items
 
 
 def read_recovery(key: str) -> tuple[str | None, str]:
-    """Return (original_path, content) for a recovery key."""
     d = _recovery_dir()
     meta_path = d / f"{key}.json"
     if not meta_path.exists():
@@ -84,7 +76,6 @@ def remove_recovery(key: str) -> None:
 
 
 def remove_recovery_for_path(original_path: str) -> None:
-    """Remove any recovery files that reference the given original path."""
     for meta in list_recoveries():
         if meta.get("original_path") == original_path:
             try:

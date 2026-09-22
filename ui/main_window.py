@@ -5,7 +5,8 @@ import re
 import sys
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QKeySequence, QTextCursor, QTextCharFormat, QColor
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -21,7 +22,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QStackedWidget,
-    QLineEdit,
 )
 
 from core.file_manager import read_file, write_file
@@ -119,30 +119,25 @@ class MainWindow(QMainWindow):
         self._build_layout()
         self._build_menu_and_shortcuts()
 
-        # autosave timer: periodically write recovery copies when document modified
+        # autosave timer
         self._autosave_timer = QTimer(self)
-        self._autosave_timer.setInterval(10 * 1000)  # 10 seconds
+        self._autosave_timer.setInterval(10 * 1000)
         self._autosave_timer.timeout.connect(self._maybe_autosave)
         self._autosave_timer.start()
 
-        # check for recoveries at startup
         self._check_startup_recovery()
 
         self.statusBar().showMessage("Ready")
         self._update_title()
 
-        # persistent status label (restore bottom status bar)
-        self._setup_statusbar()
-
     # main setup
     def _build_widgets(self) -> None:
         self.editor = CodeEditor()
         self.editor.document().modificationChanged.connect(self._on_modification_changed)
-        # live diagnostics: update explorer/error badge while editing
+
         try:
             self.editor.diagnostics_changed.connect(self._on_diagnostics_changed)
         except Exception:
-            # signal may not exist in older versions
             pass
 
         self._file_label = QLabel("Untitled")
@@ -237,14 +232,6 @@ class MainWindow(QMainWindow):
         self._editor_stack.addWidget(self._welcome_widget)
         self._editor_stack.addWidget(self._editor_container)
         self._editor_stack.setCurrentWidget(self._welcome_widget)
-
-        # search bar (hidden) for Ctrl+F
-        self._search_bar = QLineEdit()
-        self._search_bar.setPlaceholderText("Search in file")
-        self._search_bar.hide()
-        self._search_bar.returnPressed.connect(self._search_next)
-        # Esc should hide; handled via keyPressEvent on editor
-        editor_container_layout.addWidget(self._search_bar)
 
         # self.explorer = FileExplorer()
         # self.load_recent_project()
@@ -447,12 +434,6 @@ class MainWindow(QMainWindow):
         select_all_action.setShortcut(QKeySequence.SelectAll)
         select_all_action.triggered.connect(self.editor.selectAll)
         edit_menu.addAction(select_all_action)
-
-        # Ctrl+F search
-        find_action = QAction("Find", self)
-        find_action.setShortcut(QKeySequence("Ctrl+F"))
-        find_action.triggered.connect(self._open_search)
-        edit_menu.addAction(find_action)
 
         # run menu
         run_menu = menu_bar.addMenu("&Run")
@@ -794,12 +775,6 @@ class MainWindow(QMainWindow):
             return False
 
         self.editor.document().setModified(False)
-        # remove any recovery copies for this file
-        if self._current_file_path:
-            try:
-                remove_recovery_for_path(self._current_file_path)
-            except Exception:
-                pass
         self._update_title()
         self.statusBar().showMessage(f"Saved {self._current_file_path}")
         return True
@@ -1069,87 +1044,18 @@ class MainWindow(QMainWindow):
     def _show_editor(self) -> None:
         self._editor_stack.setCurrentWidget(self._editor_container)
 
-    def _setup_statusbar(self) -> None:
-        """Create a persistent status label and connect it to status bar messages."""
-        try:
-            self._status_label = QLabel("Status: Ready")
-            self.statusBar().addPermanentWidget(self._status_label)
-            self.statusBar().messageChanged.connect(self._on_statusbar_message_changed)
-        except Exception:
-            pass
-
-    def _on_statusbar_message_changed(self, msg: str) -> None:
-        if not msg:
-            disp = "Ready"
-        else:
-            disp = msg
-            if isinstance(disp, str) and disp.lower().startswith("status:"):
-                disp = disp.split(":", 1)[1].strip()
-        try:
-            self._status_label.setText(f"Status: {disp}")
-        except Exception:
-            pass
-
-    def _open_search(self) -> None:
-        self._search_bar.show()
-        self._search_bar.setFocus()
-        self._search_index = -1
-
-    def _search_next(self) -> None:
-        query = self._search_bar.text()
-        if not query:
-            return
-        doc = self.editor.document()
-        flags = 0
-        # move cursor forward
-        cursor = self.editor.textCursor()
-        start_pos = cursor.selectionEnd() if cursor.hasSelection() else cursor.position()
-        found = doc.find(query, start_pos)
-        if not found.isNull():
-            self.editor.setTextCursor(found)
-            self._highlight_search_matches(query)
-            return
-        # wrap around
-        found = doc.find(query, 0)
-        if not found.isNull():
-            self.editor.setTextCursor(found)
-            self._highlight_search_matches(query)
-
-    def _highlight_search_matches(self, query: str) -> None:
-        # build base selections and add highlights for all matches
-        base = self.editor._build_base_extra_selections()
-        doc = self.editor.document()
-        cursor = doc.find(query, 0)
-        while not cursor.isNull():
-            sel = QTextEdit.ExtraSelection()
-            sel.cursor = cursor
-            fmt = sel.format
-            fmt.setBackground(QColor('#3c3c3c'))
-            sel.format = fmt
-            base.append(sel)
-            pos = cursor.selectionEnd()
-            cursor = doc.find(query, pos)
-
-        self.editor.setExtraSelections(base)
-
     def _maybe_autosave(self) -> None:
-        """If the current document is modified, write a lightweight recovery copy."""
         if not self.editor.document().isModified():
             return
         try:
-            key = write_recovery(self._current_file_path, self.editor.toPlainText())
-            # do not spam the status bar; only show a brief message
-            self.statusBar().showMessage("Recovery saved")
+            write_recovery(self._current_file_path, self.editor.toPlainText())
         except Exception:
             pass
 
     def _check_startup_recovery(self) -> None:
-        """Detect any existing recoveries and offer the user to recover."""
         recs = list_recoveries()
         if not recs:
             return
-
-        # ask the user whether they want to recover the most recent item
         latest = recs[0]
         orig = latest.get("original_path") or "Unsaved file"
         choice = QMessageBox.question(
@@ -1162,14 +1068,12 @@ class MainWindow(QMainWindow):
         if choice == QMessageBox.Yes:
             key = latest.get("key")
             orig_path, content = read_recovery(key)
-            # open recovered content in editor without overwriting file on disk
             self.editor.setPlainText(content)
             self._current_file_path = orig_path
             self.editor.document().setModified(True)
             self._show_editor()
             self.statusBar().showMessage("Recovered unsaved work")
         else:
-            # discard this recovery
             try:
                 remove_recovery(latest.get("key"))
             except Exception:
@@ -1208,17 +1112,6 @@ class MainWindow(QMainWindow):
         self._file_label.setText(name)
         self._error_badge.setText(f"{error_count}" if error_count > 0 else "")
         self.setWindowTitle(f"{title} — {APP_NAME}")
-
-    def _on_diagnostics_changed(self, count: int) -> None:
-        """Update the UI when live diagnostics change while editing."""
-        try:
-            if self._current_file_path:
-                self.explorer.set_error_count(self._current_file_path, count)
-            self._error_badge.setText(f"{count}" if count > 0 else "")
-            # also update title to show count
-            self._update_title()
-        except Exception:
-            pass
 
     def closeEvent(self, event) -> None:
         """Called automatically by Qt when the user tries to close the window."""

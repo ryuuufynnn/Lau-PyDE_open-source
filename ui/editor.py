@@ -2,7 +2,7 @@ import ast
 import difflib
 import tokenize
 from io import StringIO
-from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt, Signal, QTimer
+from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -12,7 +12,7 @@ from PySide6.QtGui import (
     QTextFormat,
     QTextCursor,
 )
-from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget, QMenu, QAction
+from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
 
 PYTHON_KEYWORDS = [
     "False", "None", "True", "and", "as", "assert", "async", "await",
@@ -127,7 +127,6 @@ class LineNumberArea(QWidget):
 
 
 class CodeEditor(QPlainTextEdit):
-    diagnostics_changed = Signal(int)
     """
     The main code-editing widget.
 
@@ -170,28 +169,7 @@ class CodeEditor(QPlainTextEdit):
         self._highlight_current_line()
 
         self._highlighter = PythonHighlighter(self.document())
-
-        # diagnostics debounce: do not recalc on every keystroke
-        self._diagnostic_timer = QTimer(self)
-        self._diagnostic_timer.setInterval(600)
-        self._diagnostic_timer.setSingleShot(True)
-        self._diagnostic_timer.timeout.connect(self._on_diagnostic_timer)
-        self.textChanged.connect(lambda: self._diagnostic_timer.start())
-
-    def _on_diagnostic_timer(self) -> None:
-        """Called after the debounce timer fires to recalculate diagnostics
-        and notify listeners with the new issue count."""
-        try:
-            self._check_errors()
-            count = len(self.get_error_messages())
-            try:
-                self.diagnostics_changed.emit(count)
-            except Exception:
-                # in case nobody is connected
-                pass
-        except Exception:
-            # Don't let diagnostics crash the editor
-            pass
+        self.textChanged.connect(self._check_errors)
 
     def get_error_messages(self) -> list[str]:
         """Return human-readable error messages for all current issues."""
@@ -504,17 +482,7 @@ class CodeEditor(QPlainTextEdit):
 
     def _highlight_current_line(self) -> None:
         """Highlight the current line and any syntax error."""
-        selections = self._build_base_extra_selections()
-        self.setExtraSelections(selections)
-        self._line_number_area.update()
 
-    def _build_base_extra_selections(self) -> list:
-        """Build and return the list of ExtraSelection objects used for
-        the base editor UI (current line highlight and diagnostics).
-        This does not modify the editor state; callers may merge their
-        own selections with the returned list before calling
-        `setExtraSelections`.
-        """
         selections = []
 
         # current line
@@ -615,7 +583,8 @@ class CodeEditor(QPlainTextEdit):
             error_selection.cursor = cursor
             selections.append(error_selection)
 
-        return selections
+        self.setExtraSelections(selections)
+        self._line_number_area.update()
 
     # auto indentation
     def keyPressEvent(self, event) -> None:
@@ -628,52 +597,6 @@ class CodeEditor(QPlainTextEdit):
                 return
         
         super().keyPressEvent(event)
-
-    def contextMenuEvent(self, event) -> None:
-        """Show a lightweight context (hover/right-click) menu with common actions."""
-        menu = QMenu(self)
-
-        undo = QAction("Undo", self)
-        undo.triggered.connect(self.undo)
-        menu.addAction(undo)
-
-        redo = QAction("Redo", self)
-        redo.triggered.connect(self.redo)
-        menu.addAction(redo)
-
-        menu.addSeparator()
-
-        cut = QAction("Cut", self)
-        cut.triggered.connect(self.cut)
-        menu.addAction(cut)
-
-        copy = QAction("Copy", self)
-        copy.triggered.connect(self.copy)
-        menu.addAction(copy)
-
-        paste = QAction("Paste", self)
-        paste.triggered.connect(self.paste)
-        menu.addAction(paste)
-
-        menu.addSeparator()
-
-        select_all = QAction("Select All", self)
-        select_all.triggered.connect(self.selectAll)
-        menu.addAction(select_all)
-
-        find = QAction("Find", self)
-        def _open_find():
-            w = self.window()
-            if hasattr(w, "_open_search"):
-                try:
-                    w._open_search()
-                except Exception:
-                    pass
-
-        find.triggered.connect(_open_find)
-        menu.addAction(find)
-
-        menu.exec(event.globalPos())
 
     def _handle_backspace(self) -> bool:
         cursor = self.textCursor()
