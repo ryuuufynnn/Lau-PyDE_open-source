@@ -1259,28 +1259,78 @@ class MainWindow(QMainWindow):
         recs = list_recoveries()
         if not recs:
             return
-        latest = recs[0]
-        orig = latest.get("original_path") or "Unsaved file"
-        choice = QMessageBox.question(
-            self,
-            APP_NAME,
-            f"Recovered unsaved work found for: {orig}\nRestore it?",
-            QMessageBox.Yes | QMessageBox.No,
-        )
 
-        if choice == QMessageBox.Yes:
+        # Walk recoveries (newest first) and prompt only when the
+        # recovered content differs from the on-disk file (or the
+        # original path does not exist). If the file on disk already
+        # matches the recovered content, remove the recovery silently.
+        for latest in recs:
             key = latest.get("key")
-            orig_path, content = read_recovery(key)
-            self.editor.setPlainText(content)
-            self._current_file_path = orig_path
-            self.editor.document().setModified(True)
-            self._show_editor()
-            self.statusBar().showMessage("Recovered unsaved work")
-        else:
             try:
-                remove_recovery(latest.get("key"))
+                orig_path, content = read_recovery(key)
             except Exception:
-                pass
+                orig_path, content = None, ""
+
+            # If recovery points to an original file that exists on disk,
+            # compare contents. If identical, discard this recovery and
+            # continue to the next one.
+            if orig_path:
+                try:
+                    if Path(orig_path).is_file():
+                        try:
+                            on_disk = read_file(orig_path)
+                        except Exception:
+                            on_disk = None
+
+                        if on_disk is not None and on_disk == content:
+                            try:
+                                # remove any stale recoveries for this path
+                                remove_recovery_for_path(orig_path)
+                            except Exception:
+                                pass
+                            continue
+                except Exception:
+                    # if any unexpected error, fall back to prompting
+                    pass
+
+            # At this point we have a recovery that is either for an
+            # unsaved buffer or differs from the on-disk file; prompt the
+            # user to restore it.
+            orig = orig_path or "Unsaved file"
+            choice = QMessageBox.question(
+                self,
+                APP_NAME,
+                f"Recovered unsaved work found for: {orig}\nRestore it?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+
+            if choice == QMessageBox.Yes:
+                self.editor.setPlainText(content)
+                self._current_file_path = orig_path
+                self.editor.document().setModified(True)
+                self._show_editor()
+                self.statusBar().showMessage("Recovered unsaved work")
+                try:
+                    if orig_path:
+                        # clear any other recoveries for this file
+                        remove_recovery_for_path(orig_path)
+                    else:
+                        remove_recovery(key)
+                except Exception:
+                    pass
+                return
+            else:
+                try:
+                    if orig_path:
+                        # user declined: remove all recoveries for that path
+                        remove_recovery_for_path(orig_path)
+                    else:
+                        remove_recovery(key)
+                except Exception:
+                    pass
+
+        # no recoveries required after scanning
+        return
 
     def _show_bottom_panel(self, pane: str) -> None:
         self._restore_layout()
