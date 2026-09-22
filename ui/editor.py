@@ -11,8 +11,9 @@ from PySide6.QtGui import (
     QTextCharFormat,
     QTextFormat,
     QTextCursor,
+    QAction,
 )
-from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
+from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget, QMenu
 
 PYTHON_KEYWORDS = [
     "False", "None", "True", "and", "as", "assert", "async", "await",
@@ -597,6 +598,52 @@ class CodeEditor(QPlainTextEdit):
                 return
         
         super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        """Show a lightweight context (right-click) menu with common actions."""
+        menu = QMenu(self)
+
+        undo = QAction("Undo", self)
+        undo.triggered.connect(self.undo)
+        menu.addAction(undo)
+
+        redo = QAction("Redo", self)
+        redo.triggered.connect(self.redo)
+        menu.addAction(redo)
+
+        menu.addSeparator()
+
+        cut = QAction("Cut", self)
+        cut.triggered.connect(self.cut)
+        menu.addAction(cut)
+
+        copy = QAction("Copy", self)
+        copy.triggered.connect(self.copy)
+        menu.addAction(copy)
+
+        paste = QAction("Paste", self)
+        paste.triggered.connect(self.paste)
+        menu.addAction(paste)
+
+        menu.addSeparator()
+
+        select_all = QAction("Select All", self)
+        select_all.triggered.connect(self.selectAll)
+        menu.addAction(select_all)
+
+        find = QAction("Find", self)
+        def _open_find():
+            w = self.window()
+            if hasattr(w, "_open_search"):
+                try:
+                    w._open_search()
+                except Exception:
+                    pass
+
+        find.triggered.connect(_open_find)
+        menu.addAction(find)
+
+        menu.exec(event.globalPos())
 
     def _handle_backspace(self) -> bool:
         cursor = self.textCursor()
