@@ -13,7 +13,8 @@ from PySide6.QtGui import (
     QTextCursor,
     QAction,
 )
-from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget, QMenu
+from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget, QMenu, QCompleter
+from PySide6.QtCore import QStringListModel
 
 PYTHON_KEYWORDS = [
     "False", "None", "True", "and", "as", "assert", "async", "await",
@@ -171,6 +172,13 @@ class CodeEditor(QPlainTextEdit):
 
         self._highlighter = PythonHighlighter(self.document())
         self.textChanged.connect(self._check_errors)
+
+        # lightweight completion: keywords, builtins, and user-defined names
+        self._completion_model = QStringListModel()
+        self._completer = QCompleter(self._completion_model, self)
+        self._completer.setWidget(self)
+        self._completer.setCompletionMode(QCompleter.PopupCompletion)
+        self._completer.setCaseSensitivity(Qt.CaseInsensitive)
 
     def get_error_messages(self) -> list[str]:
         """Return human-readable error messages for all current issues."""
@@ -342,6 +350,12 @@ class CodeEditor(QPlainTextEdit):
         try:
             tree = ast.parse(code)
             defined_names = self._collect_defined_names(tree)
+            # update completion model with keywords + builtins + defined names
+            completions = set(PYTHON_KEYWORDS + PYTHON_BUILTINS) | set(defined_names)
+            try:
+                self._completion_model.setStringList(sorted(completions))
+            except Exception:
+                pass
         except SyntaxError as error:
             if error.lineno is not None and error.offset is not None:
                 start = error.offset
@@ -434,6 +448,44 @@ class CodeEditor(QPlainTextEdit):
                     seen_name.add(item)
         self._highlight_current_line()
         self._line_number_area.update()
+
+    def _word_under_cursor(self) -> str:
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.WordUnderCursor)
+        return cursor.selectedText()
+
+    def keyPressEvent(self, event) -> None:
+        # allow auto-indent/backspace handling
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self._handle_auto_indent()
+            return
+
+        if event.key() == Qt.Key_Backspace:
+            if self._handle_backspace():
+                return
+
+        # Ctrl+Space to manually trigger completion
+        if event.key() == Qt.Key_Space and event.modifiers() & Qt.ControlModifier:
+            prefix = self._word_under_cursor()
+            try:
+                self._completer.setCompletionPrefix(prefix)
+                self._completer.complete()
+            except Exception:
+                pass
+            return
+
+        super().keyPressEvent(event)
+
+        # after inserting a character, if it's part of an identifier, show completions
+        last = event.text()
+        if last and (last.isalpha() or last == "_" or last.isdigit()):
+            prefix = self._word_under_cursor()
+            if prefix:
+                try:
+                    self._completer.setCompletionPrefix(prefix)
+                    self._completer.complete()
+                except Exception:
+                    pass
 
     # line number gutter
     def line_number_area_width(self) -> int:
