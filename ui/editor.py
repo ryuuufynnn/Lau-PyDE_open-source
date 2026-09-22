@@ -259,6 +259,7 @@ class CodeEditor(QPlainTextEdit):
         """Collect names that are actually defined in the code so we do not
         flag valid variables as misspellings or undefined names."""
         defined: set[str] = set()
+        imports: set[str] = set()
 
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -269,9 +270,53 @@ class CodeEditor(QPlainTextEdit):
                 defined.add(node.id)
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in node.names:
-                    defined.add(alias.asname or alias.name.split(".")[0])
+                    name = alias.asname or alias.name.split(".")[0]
+                    defined.add(name)
+                    imports.add(name)
 
-        return defined
+        return defined, imports
+
+    def _get_enclosing_scope_names(self, tree: ast.AST, cursor_line: int) -> set[str]:
+        """Return names defined in the smallest enclosing function/class for cursor_line.
+
+        Falls back to empty set when no enclosing scope found.
+        """
+        candidates = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                start = getattr(node, 'lineno', None)
+                end = getattr(node, 'end_lineno', None)
+                if start is None:
+                    continue
+                if end is None:
+                    # approximate end_lineno by scanning child nodes
+                    end = start
+                    for sub in ast.walk(node):
+                        if hasattr(sub, 'lineno'):
+                            end = max(end, getattr(sub, 'lineno'))
+
+                if start <= cursor_line <= end:
+                    # collect names defined directly under this node
+                    names = set()
+                    for sub in ast.walk(node):
+                        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                            names.add(sub.name)
+                        elif isinstance(sub, ast.arg):
+                            names.add(sub.arg)
+                        elif isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
+                            names.add(sub.id)
+                        elif isinstance(sub, (ast.Import, ast.ImportFrom)):
+                            for alias in sub.names:
+                                names.add(alias.asname or alias.name.split('.')[0])
+                    candidates.append((start, end, names))
+
+        if not candidates:
+            return set()
+
+        # choose the smallest enclosing scope (shortest range)
+        candidates.sort(key=lambda t: (t[1] - t[0], t[0]))
+        return candidates[0][2]
 
     def _check_errors(self) -> None:
         code = self.toPlainText()
@@ -349,13 +394,67 @@ class CodeEditor(QPlainTextEdit):
 
         try:
             tree = ast.parse(code)
-            defined_names = self._collect_defined_names(tree)
-            # update completion model with keywords + builtins + defined names
-            completions = set(PYTHON_KEYWORDS + PYTHON_BUILTINS) | set(defined_names)
+            defined_names, imports = self._collect_defined_names(tree)
+            # find enclosing scope names for the cursor (if available)
+            cursor = self.textCursor()
+            cursor_line = cursor.blockNumber() + 1
+            scope_names = self._get_enclosing_scope_names(tree, cursor_line)
+            # Build a ranked completion list:
+            # 1) defined names (most frequent first), 2) builtins (used first),
+            # 3) remaining builtins, 4) keywords.
             try:
-                self._completion_model.setStringList(sorted(completions))
+                from collections import Counter
+
+                name_counts = Counter()
+                try:
+                    toks = list(tokenize.generate_tokens(StringIO(code).readline))
+                except Exception:
+                    toks = []
+
+                for t in toks:
+                    if t.type == tokenize.NAME:
+                        name_counts[t.string] += 1
+
+                # defined names sorted by whether they're in scope, then frequency then name
+                def defined_key(n):
+                    in_scope = 0 if n in scope_names else 1
+                    return (in_scope, -name_counts.get(n, 0), n)
+
+                defined_sorted = sorted(defined_names, key=defined_key)
+
+                # builtins seen in the file first (by frequency), then remaining builtins
+                builtin_seen = [b for b in PYTHON_BUILTINS if name_counts.get(b, 0) > 0]
+                builtin_seen.sort(key=lambda b: -name_counts.get(b, 0))
+                builtin_remaining = [b for b in PYTHON_BUILTINS if b not in builtin_seen]
+
+                # keywords: include all but keep them low-priority
+                keywords_sorted = sorted(PYTHON_KEYWORDS)
+
+                suggestion_list = []
+                suggestion_list.extend(defined_sorted)
+                suggestion_list.extend(builtin_seen)
+                suggestion_list.extend(builtin_remaining)
+                suggestion_list.extend(keywords_sorted)
+
+                # deduplicate while preserving order
+                seen = set()
+                final_list = []
+                for s in suggestion_list:
+                    if s in seen:
+                        continue
+                    seen.add(s)
+                    final_list.append(s)
+
+                # keep the suggestion list compact
+                MAX_SUGGESTIONS = 60
+                self._completion_model.setStringList(final_list[:MAX_SUGGESTIONS])
             except Exception:
-                pass
+                # fall back to a simple combined list if anything goes wrong
+                try:
+                    completions = set(PYTHON_KEYWORDS + PYTHON_BUILTINS) | set(defined_names)
+                    self._completion_model.setStringList(sorted(completions))
+                except Exception:
+                    pass
         except SyntaxError as error:
             if error.lineno is not None and error.offset is not None:
                 start = error.offset
