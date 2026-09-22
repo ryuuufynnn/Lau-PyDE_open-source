@@ -153,39 +153,83 @@ class FileExplorer(QWidget):
         # context menu for file actions
         self._tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
+        # track last parent index we hid rows under so we can unhide later
+        self._last_hidden_parent = None
 
     def set_root_folder(self, folder_path: str | None) -> None:
         """Point the explorer at a new project folder."""
         # if no folder is open, hide the tree
         if not folder_path:
+            # unhide any previously hidden rows
+            try:
+                if self._last_hidden_parent is not None:
+                    self._unhide_all_rows(self._last_hidden_parent)
+            except Exception:
+                pass
             self._tree.hide()
             return
-
         p = Path(folder_path)
-        parent = p.parent
-
-        # If parent exists and is different, set the model root to the parent
-        # so the chosen folder appears as a visible child (expand/collapse).
         try:
-            if parent.exists() and str(parent) != str(p):
-                root_index = self._model.setRootPath(str(parent))
-                self._tree.setRootIndex(root_index)
-                # expand and select the folder node
-                folder_idx = self._model.index(str(p))
-                if folder_idx.isValid():
-                    self._tree.expand(folder_idx)
-                    self._tree.setCurrentIndex(folder_idx)
-            else:
-                # fallback: set the model root directly to the folder
-                root_index = self._model.setRootPath(str(p))
-                self._tree.setRootIndex(root_index)
+            # If possible, set the view root to the folder's parent and
+            # hide all siblings so the chosen folder is the only visible
+            # child. This makes the explorer clearly show "the chosen
+            # folder" rather than a list of siblings under its parent.
+            parent = p.parent
+            if parent.exists() and parent != p:
+                # clear previously hidden rows
+                if self._last_hidden_parent is not None:
+                    try:
+                        self._unhide_all_rows(self._last_hidden_parent)
+                    except Exception:
+                        pass
 
-            self._tree.show()
+                self._model.setRootPath(str(parent))
+                parent_idx = self._model.index(str(parent))
+                self._tree.setRootIndex(parent_idx)
+
+                # hide all rows except the chosen folder
+                for row in range(self._model.rowCount(parent_idx)):
+                    child = self._model.index(row, 0, parent_idx)
+                    child_path = self._model.filePath(child)
+                    hide = child_path != str(p)
+                    try:
+                        self._tree.setRowHidden(row, parent_idx, hide)
+                    except Exception:
+                        pass
+
+                # remember which parent we hid rows under so we can unhide later
+                self._last_hidden_parent = parent_idx
+
+                # expand the chosen folder so its contents are visible
+                try:
+                    chosen_idx = self._model.index(str(p))
+                    if chosen_idx.isValid():
+                        self._tree.expand(chosen_idx)
+                        self._tree.setCurrentIndex(chosen_idx)
+                except Exception:
+                    pass
+
+                self._tree.show()
+                return
+
+            # fallback: set the model root directly to the folder
+            self._model.setRootPath(str(p))
+            idx = self._model.index(str(p))
+            if idx.isValid():
+                self._tree.setRootIndex(idx)
+                try:
+                    self._tree.expand(idx)
+                except Exception:
+                    pass
+                self._tree.show()
         except Exception:
-            # last-resort fallback
-            root_index = self._model.setRootPath(folder_path)
-            self._tree.setRootIndex(root_index)
-            self._tree.show()
+            # fallback: try setting the model root to the provided path
+            try:
+                root_index = self._model.setRootPath(folder_path)
+                self._tree.setRootIndex(root_index)
+                self._tree.show()
+            except Exception:
+                self._tree.hide()
 
     def _on_double_clicked(self, index) -> None:
         path = self._model.filePath(index)
@@ -240,6 +284,17 @@ class FileExplorer(QWidget):
 
             self._tree.setCurrentIndex(idx)
             self._tree.scrollTo(idx)
+
+    def _unhide_all_rows(self, parent_idx: QModelIndex) -> None:
+        """Unhide all rows under the given parent index."""
+        try:
+            for row in range(self._model.rowCount(parent_idx)):
+                try:
+                    self._tree.setRowHidden(row, parent_idx, False)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _on_context_menu(self, pos) -> None:
         index = self._tree.indexAt(pos)

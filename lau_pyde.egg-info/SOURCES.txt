@@ -13,7 +13,9 @@ lau_pyde.egg-info/entry_points.txt
 lau_pyde.egg-info/requires.txt
 lau_pyde.egg-info/top_level.txt
 tests/test_editor_error_numbers.py
+tests/test_gui_search_completion.py
 ui/__init__.py
+ui/commits.py
 ui/editor.py
 ui/explorer.py
 ui/inline_output.py

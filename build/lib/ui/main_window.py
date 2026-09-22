@@ -1,26 +1,41 @@
 from pathlib import Path
 import json
+import os
 import re
+import sys
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence, QTextCursor, QTextCharFormat, QColor
+from PySide6.QtCore import QTimer
+from PySide6.QtGui import QAction, QKeySequence, QTextCursor, QTextCharFormat, QColor, QTextCharFormat as _QTextCharFormat
+from PySide6.QtWidgets import QTextEdit
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
+    QLineEdit,
     QTabWidget,
     QVBoxLayout,
     QWidget,
     QStackedWidget,
+    
 )
+from PySide6.QtGui import QShortcut
 
 from core.file_manager import read_file, write_file
+from core.file_manager import (
+    write_recovery,
+    list_recoveries,
+    read_recovery,
+    remove_recovery,
+    remove_recovery_for_path,
+)
 from core.runner import PythonRunner
 from ui.editor import CodeEditor
 from ui.explorer import FileExplorer
@@ -100,12 +115,21 @@ class MainWindow(QMainWindow):
         self._maximized_pane: Optional[str] = None
         self._explorer_minimized = False
         self._bottom_minimized = False
+        self._project_root_permission_granted = False
 
         self.resize(1200, 800)
 
         self._build_widgets()
         self._build_layout()
         self._build_menu_and_shortcuts()
+
+        # autosave timer
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(10 * 1000)
+        self._autosave_timer.timeout.connect(self._maybe_autosave)
+        self._autosave_timer.start()
+
+        self._check_startup_recovery()
 
         self.statusBar().showMessage("Ready")
         self._update_title()
@@ -114,6 +138,12 @@ class MainWindow(QMainWindow):
     def _build_widgets(self) -> None:
         self.editor = CodeEditor()
         self.editor.document().modificationChanged.connect(self._on_modification_changed)
+
+        # connect diagnostics_changed signal to update explorer error badge
+        try:
+            self.editor.diagnostics_changed.connect(self._on_diagnostics_changed)
+        except Exception:
+            pass
 
         self._file_label = QLabel("Untitled")
         self._file_label.setStyleSheet(
@@ -131,11 +161,34 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
         header_layout.addWidget(self._error_badge)
 
+        # lightweight in-editor search bar (hidden by default)
+        self._search_bar = QWidget()
+        sb_layout = QHBoxLayout(self._search_bar)
+        sb_layout.setContentsMargins(6, 4, 6, 4)
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Find in file (Ctrl+F)")
+        self._search_prev = QPushButton("▲")
+        self._search_next = QPushButton("▼")
+        self._search_count = QLabel("")
+        self._search_close = QPushButton("✕")
+        for w in (self._search_prev, self._search_next, self._search_close):
+            w.setFixedWidth(28)
+            w.setCursor(Qt.PointingHandCursor)
+            w.setStyleSheet("border: none;")
+
+        sb_layout.addWidget(self._search_input)
+        sb_layout.addWidget(self._search_prev)
+        sb_layout.addWidget(self._search_next)
+        sb_layout.addWidget(self._search_count)
+        sb_layout.addWidget(self._search_close)
+        self._search_bar.hide()
+
         self._editor_container = QWidget()
         editor_container_layout = QVBoxLayout(self._editor_container)
         editor_container_layout.setContentsMargins(0, 0, 0, 0)
         editor_container_layout.setSpacing(0)
         editor_container_layout.addWidget(editor_header)
+        editor_container_layout.addWidget(self._search_bar)
         editor_container_layout.addWidget(self.editor)
 
         # starting code for the welcome message
@@ -214,6 +267,21 @@ class MainWindow(QMainWindow):
         self.explorer = FileExplorer()
         self.explorer.set_root_folder(None)
 
+        # connect search controls
+        self._search_input.textChanged.connect(self._on_search_text_changed)
+        self._search_prev.clicked.connect(lambda: self._search_move(-1))
+        self._search_next.clicked.connect(lambda: self._search_move(1))
+        self._search_close.clicked.connect(self._close_search)
+        # Ctrl+F shortcut
+        try:
+            QShortcut(QKeySequence("Ctrl+F"), self, activated=self._open_search)
+        except Exception:
+            pass
+
+        # internal search state
+        self._search_matches: list[QTextCursor] = []
+        self._search_index: int = -1
+
         self.load_recent_project()
         self.explorer.file_double_clicked.connect(self.open_file)
 
@@ -234,6 +302,36 @@ class MainWindow(QMainWindow):
         self._runner = PythonRunner()
         self._runner.output_ready.connect(self._append_output)
         self._runner.finished.connect(self._on_run_finished)
+
+    def _on_diagnostics_changed(self, count: int) -> None:
+        """Handle diagnostics_changed signals from the editor by updating
+        the explorer's error count for the currently open file and the UI."""
+        try:
+            if not self._current_file_path:
+                return
+
+            # update explorer badge/count
+            try:
+                self.explorer.set_error_count(self._current_file_path, count)
+            except Exception:
+                pass
+
+            # update small error badge in editor header and window title
+            try:
+                if count:
+                    self._error_badge.setText(f"Errors: {count}")
+                else:
+                    self._error_badge.setText("")
+            except Exception:
+                pass
+
+            # refresh title/status
+            try:
+                self._update_title()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def send_input(self, text: str) -> None:
         if not self._runner.is_running():
@@ -315,6 +413,76 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(main_splitter)
 
+    # Search helpers
+    def _open_search(self) -> None:
+        self._search_bar.show()
+        self._search_input.setFocus()
+
+    def _close_search(self) -> None:
+        self._search_bar.hide()
+        self._search_input.clear()
+        self._clear_search_highlights()
+
+    def _on_search_text_changed(self, text: str) -> None:
+        self._find_all_in_editor(text)
+
+    def _find_all_in_editor(self, pattern: str) -> None:
+        self._clear_search_highlights()
+        if not pattern:
+            self._search_count.setText("")
+            return
+
+        doc = self.editor.document()
+        cursor = doc.find(pattern)
+        matches = []
+        while not cursor.isNull():
+            # clone the cursor
+            c = QTextCursor(cursor)
+            matches.append(c)
+            cursor = doc.find(pattern, cursor)
+
+        self._search_matches = matches
+        self._search_index = 0 if matches else -1
+        self._search_count.setText(f"{len(matches)}")
+        # highlight all matches and select the first
+        for c in matches:
+            self._highlight_range(c.selectionStart(), c.selectionEnd())
+
+        if matches:
+            self._select_search_index(0)
+
+    def _highlight_range(self, start: int, end: int) -> None:
+        extra = QTextEdit.ExtraSelection()
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("#44475a"))
+        extra.format = fmt
+        cur = self.editor.textCursor()
+        cur.setPosition(start)
+        cur.setPosition(end, QTextCursor.KeepAnchor)
+        extra.cursor = cur
+        sels = self.editor.extraSelections()
+        sels.append(extra)
+        self.editor.setExtraSelections(sels)
+
+    def _clear_search_highlights(self) -> None:
+        self.editor.setExtraSelections([])
+
+    def _select_search_index(self, idx: int) -> None:
+        if not self._search_matches:
+            return
+        idx = idx % len(self._search_matches)
+        self._search_index = idx
+        cur = self._search_matches[idx]
+        self.editor.setTextCursor(cur)
+        # ensure visible
+        self.editor.centerCursor()
+
+    def _search_move(self, delta: int) -> None:
+        if not self._search_matches:
+            return
+        self._search_index = (self._search_index + delta) % len(self._search_matches)
+        self._select_search_index(self._search_index)
+
     def _build_menu_and_shortcuts(self) -> None:
         """
         Build the menu bar.
@@ -333,6 +501,11 @@ class MainWindow(QMainWindow):
         new_action.setShortcut(QKeySequence("Ctrl+N"))
         new_action.triggered.connect(self.new_file)
         file_menu.addAction(new_action)
+
+        new_folder_action = QAction("New Folder", self)
+        new_folder_action.setShortcut(QKeySequence("Ctrl+Shift+N"))
+        new_folder_action.triggered.connect(self.new_folder)
+        file_menu.addAction(new_folder_action)
 
         open_action = QAction("Open File...", self)
         open_action.setShortcut(QKeySequence("Ctrl+O"))
@@ -437,6 +610,7 @@ class MainWindow(QMainWindow):
 
         restore_layout_action = QAction("Restore Layout", self)
         restore_layout_action.triggered.connect(self._restore_layout)
+        restore_layout_action.setShortcut(QKeySequence("Ctrl+0"))
         view_menu.addAction(restore_layout_action)
 
         # for loop for pointing hand cursor
@@ -459,17 +633,212 @@ class MainWindow(QMainWindow):
         focus_terminal_action.triggered.connect(self._focus_terminal)
         terminal_menu.addAction(focus_terminal_action)
 
+        # Git actions (Feature 9): interactive push which may prompt for credentials
+        git_menu = menu_bar.addMenu("&Git")
+
+        git_push_action = QAction("Push (git)", self)
+        git_push_action.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        git_push_action.triggered.connect(self._git_push)
+        git_menu.addAction(git_push_action)
+
+        # help menu / updater
+        help_menu = menu_bar.addMenu("&Help")
+
+        update_action = QAction("Update Lau-PyDE", self)
+        update_action.setShortcut(QKeySequence("Ctrl+U"))
+        update_action.triggered.connect(self._update_lau_pyde)
+        help_menu.addAction(update_action)
+
     # file operations
+    def _project_root(self) -> Path:
+        return Path.home() / "Lau-PyDE_Projects"
+
+    def _ensure_project_root(self) -> bool:
+        root = self._project_root()
+
+        if root.exists():
+            return True
+
+        if self._project_root_permission_granted:
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+                return True
+            except OSError as error:
+                QMessageBox.critical(
+                    self,
+                    APP_NAME,
+                    f"Lau-PyDE cannot create the project folder at:\n{root}\n\n{error}\n\nPlease choose a different writable location.",
+                )
+                return False
+
+        choice = QMessageBox.question(
+            self,
+            APP_NAME,
+            f"Lau-PyDE wants to create a project folder in your home directory:\n{root}\n\nAllow it?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+
+        if choice != QMessageBox.Yes:
+            folder = QFileDialog.getExistingDirectory(
+                self,
+                "Choose a writable project folder",
+                str(Path.home()),
+            )
+            if not folder:
+                return False
+            self._current_folder = folder
+            self.explorer.set_root_folder(folder)
+            self.terminal_panel.set_working_directory(folder)
+            return True
+
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            self._project_root_permission_granted = True
+            return True
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                APP_NAME,
+                f"Permission denied while creating the project folder:\n{root}\n\n{error}\n\nPlease choose a different writable location.",
+            )
+            return False
+
     def new_file(self) -> None:
         if not self._confirm_discard_changes():
             return
 
+        default_dir = Path(self._current_folder) if self._current_folder else Path.home()
+        if not default_dir.exists():
+            default_dir = Path.home()
+
+        file_name, ok = QInputDialog.getText(
+            self,
+            "New File",
+            "File name (.py):",
+            text="untitled.py",
+        )
+
+        if not ok:
+            return
+
+        clean_name = (file_name or "untitled.py").strip()
+        if not clean_name:
+            clean_name = "untitled.py"
+        if not clean_name.endswith(".py"):
+            clean_name = f"{clean_name}.py"
+
+        target_path = default_dir / clean_name
+        if target_path.exists():
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                f"A file named '{clean_name}' already exists at:\n{target_path}",
+            )
+            return
+
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text("", encoding="utf-8")
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                APP_NAME,
+                f"Could not create file:\n{target_path}\n\n{error}",
+            )
+            return
+
         self.editor.clear()
         self._show_editor()
-        self._current_file_path = None
+        self._current_file_path = str(target_path)
         self.editor.document().setModified(False)
         self._update_title()
-        self.statusBar().showMessage("New file")
+        self.statusBar().showMessage(f"New file: {target_path}")
+
+    def new_folder(self) -> None:
+        """Create a project folder in the home-directory Lau-PyDE_Projects root."""
+        if not self._ensure_project_root():
+            return
+
+        root = self._project_root()
+        project_name, ok = QInputDialog.getText(
+            self,
+            "New Project Folder",
+            "Project name:",
+            text="",
+        )
+
+        if not ok or not project_name.strip():
+            return
+
+        clean_name = project_name.strip().strip("/\\")
+        if not clean_name:
+            return
+
+        folder = root / clean_name
+        if folder.exists():
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                f"A project folder named '{clean_name}' already exists at:\n{folder}",
+            )
+            return
+
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                APP_NAME,
+                f"Could not create project folder:\n{folder}\n\n{error}",
+            )
+            return
+
+        self._current_folder = str(folder)
+        self.explorer.set_root_folder(str(folder))
+        self.terminal_panel.set_working_directory(str(folder))
+        RECENT_PROJECT_FILE.write_text(json.dumps({"project": str(folder)}))
+
+        create_file_choice = QMessageBox.question(
+            self,
+            APP_NAME,
+            f"Project folder created at:\n{folder}\n\nCreate a starter .py file in it now?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+
+        if create_file_choice == QMessageBox.Yes:
+            starter_name, starter_ok = QInputDialog.getText(
+                self,
+                "Starter Python File",
+                "File name (.py):",
+                text="main.py",
+            )
+            if starter_ok:
+                file_name = (starter_name or "main.py").strip()
+                if not file_name:
+                    file_name = "main.py"
+                if not file_name.endswith(".py"):
+                    file_name = f"{file_name}.py"
+                file_path = folder / file_name
+                try:
+                    file_path.write_text("", encoding="utf-8")
+                except OSError as error:
+                    QMessageBox.critical(
+                        self,
+                        APP_NAME,
+                        f"Could not create starter file:\n{file_path}\n\n{error}",
+                    )
+                    return
+                self._current_file_path = str(file_path)
+                self.editor.setPlainText("")
+                self.editor.document().setModified(False)
+                self._show_editor()
+                self._update_title()
+                self.statusBar().showMessage(f"Project folder opened: {folder}")
+                return
+
+        self._show_editor()
+        self._update_title()
+        self.statusBar().showMessage(f"Project folder opened: {folder}")
 
     def open_file_dialog(self) -> None:
         if not self._confirm_discard_changes():
@@ -495,6 +864,13 @@ class MainWindow(QMainWindow):
         self._current_file_path = path
         self.editor.document().setModified(False)
 
+        # reveal the file in the explorer tree
+        try:
+            if hasattr(self, 'explorer'):
+                self.explorer.reveal_path(path)
+        except Exception:
+            pass
+
         if self._current_folder:
             RECENT_PROJECT_FILE.write_text(
                 json.dumps(
@@ -519,6 +895,11 @@ class MainWindow(QMainWindow):
             # self.statusBar().showMessage(f"Workspace: {folder}")
             self._current_folder = folder
             self.explorer.set_root_folder(folder)
+            # ensure the explorer is visible when a folder is opened
+            try:
+                self.explorer.show()
+            except Exception:
+                pass
             self.terminal_panel.set_working_directory(folder)
 
             RECENT_PROJECT_FILE.write_text(
@@ -579,6 +960,10 @@ class MainWindow(QMainWindow):
             if folder and Path(folder).is_dir():
                 self._current_folder = folder
                 self.explorer.set_root_folder(folder)
+                try:
+                    self.explorer.show()
+                except Exception:
+                    pass
 
                 file_path = data.get("file")
 
@@ -757,15 +1142,13 @@ class MainWindow(QMainWindow):
 
     # pane layout
     def _minimize_bottom_panel(self) -> None:
-        self._restore_layout()
         self._bottom_minimized = True
-        self._bottom_tabs.hide()
+        self._restore_layout()
         self.statusBar().showMessage("Output and terminal minimized. Use View to show them.")
 
     def _minimize_explorer(self) -> None:
-        self._restore_layout()
         self._explorer_minimized = True
-        self.explorer.hide()
+        self._restore_layout()
         self.statusBar().showMessage("Explorer minimized. Use View to show it.")
 
     def _maximize_pane(self, pane: str) -> None:
@@ -810,7 +1193,8 @@ class MainWindow(QMainWindow):
         self._editor_and_output.setVisible(True)
 
         self.explorer.setVisible(not self._explorer_minimized)
-        self.explorer.show()
+        # Respect the minimized flag; `setVisible` controls whether
+        # the explorer is shown. Do not force-show here.
 
         self._bottom_tabs.show()
         self._bottom_tabs.setVisible(not self._bottom_minimized)
@@ -834,6 +1218,166 @@ class MainWindow(QMainWindow):
 
     def _show_editor(self) -> None:
         self._editor_stack.setCurrentWidget(self._editor_container)
+
+    def _maybe_autosave(self) -> None:
+        if not self.editor.document().isModified():
+            return
+        try:
+            write_recovery(self._current_file_path, self.editor.toPlainText())
+        except Exception:
+            pass
+
+    def _git_push(self) -> None:
+        """Run `git push` in the current project folder using the terminal.
+
+        This opens the terminal panel and runs `git push`. The terminal is
+        already wired to allow interactive stdin so credential prompts will
+        be handled by the inline terminal input.
+        """
+        folder = self._current_folder or (Path(self._current_file_path).parent if self._current_file_path else None)
+        if not folder:
+            QMessageBox.information(self, APP_NAME, "Open a project folder or file first to run git push.")
+            return
+
+        self._show_bottom_panel("terminal")
+        try:
+            # ensure terminal working directory and start the command
+            self.terminal_panel.set_working_directory(str(folder))
+            # start git push; the TerminalPanel will run bash -c 'git push'
+            self.terminal_panel._run_command("git push")
+        except Exception as e:
+            QMessageBox.critical(self, APP_NAME, f"Could not start git push:\n{e}")
+
+    def _update_lau_pyde(self) -> None:
+        """Attempt to update the Lau-PyDE source by pulling from the git
+        remote. This runs `git pull --rebase` in the project root and
+        shows output in the terminal panel. This is intentionally a
+        simple helper — network failures, detached HEAD, or diverging
+        histories are shown to the user but not auto-resolved.
+        """
+        # prefer current folder; fall back to repo root of this file
+        folder = self._current_folder or str(Path(__file__).resolve().parent.parent)
+        self._show_bottom_panel("terminal")
+        try:
+            self.terminal_panel.set_working_directory(str(folder))
+            self.terminal_panel._run_command("git pull --rebase")
+        except Exception as e:
+            QMessageBox.critical(self, APP_NAME, f"Could not start update:\n{e}")
+
+    def _check_startup_recovery(self) -> None:
+        recs = list_recoveries()
+        if not recs:
+            return
+        # Group recoveries by their original path (use a sentinel for
+        # unsaved buffers) and handle each group once so we don't loop
+        # prompting the user for multiple recovery files that belong to
+        # the same original path.
+        groups: dict[str, list[dict]] = {}
+        for meta in recs:
+            orig = meta.get("original_path")
+            key = orig if orig is not None else "<unsaved>"
+            groups.setdefault(key, []).append(meta)
+
+        for group_key, metas in groups.items():
+            # pick the newest recovery in this group
+            metas.sort(key=lambda m: m.get("timestamp", 0), reverse=True)
+            latest = metas[0]
+            key = latest.get("key")
+            try:
+                orig_path, content = read_recovery(key)
+            except Exception:
+                orig_path, content = None, ""
+
+            # If this group maps to an on-disk file, and the file already
+            # matches the recovered content, remove all recoveries for
+            # the path and skip prompting.
+            if orig_path:
+                try:
+                    if Path(orig_path).is_file():
+                        try:
+                            on_disk = read_file(orig_path)
+                        except Exception:
+                            on_disk = None
+
+                        if on_disk is not None and on_disk == content:
+                            try:
+                                remove_recovery_for_path(orig_path)
+                            except Exception:
+                                pass
+                            continue
+                except Exception:
+                    pass
+
+            # For unsaved groups, if any currently-open file matches the
+            # content, consider the recovery stale and remove it.
+            if orig_path is None:
+                try:
+                    if self._current_file_path and Path(self._current_file_path).is_file():
+                        try:
+                            current_on_disk = read_file(self._current_file_path)
+                        except Exception:
+                            current_on_disk = None
+
+                        if current_on_disk is not None and current_on_disk == content:
+                            # remove all unsaved recoveries
+                            try:
+                                for m in metas:
+                                    remove_recovery(m.get("key"))
+                            except Exception:
+                                pass
+                            continue
+                except Exception:
+                    pass
+
+            # Prompt the user for this group's latest recovery
+            orig = orig_path or "Unsaved file"
+            choice = QMessageBox.question(
+                self,
+                APP_NAME,
+                f"Recovered unsaved work found for: {orig}\nRestore it?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+
+            if choice == QMessageBox.Yes:
+                # Restore content into the editor. If this recovery maps
+                # to a real file path, set the current file accordingly.
+                self.editor.setPlainText(content)
+                self._current_file_path = orig_path
+                # Mark modified only if the recovery differs from on-disk
+                if orig_path and Path(orig_path).is_file():
+                    try:
+                        on_disk = read_file(orig_path)
+                    except Exception:
+                        on_disk = None
+                    self.editor.document().setModified(on_disk is None or on_disk != content)
+                else:
+                    self.editor.document().setModified(True)
+
+                self._show_editor()
+                self.statusBar().showMessage("Recovered unsaved work")
+
+                # Remove all recoveries in this group so we don't prompt again
+                try:
+                    if orig_path:
+                        remove_recovery_for_path(orig_path)
+                    else:
+                        for m in metas:
+                            remove_recovery(m.get("key"))
+                except Exception:
+                    pass
+                return
+            else:
+                # User declined: remove all recoveries for this group
+                try:
+                    if orig_path:
+                        remove_recovery_for_path(orig_path)
+                    else:
+                        for m in metas:
+                            remove_recovery(m.get("key"))
+                except Exception:
+                    pass
+
+        return
 
     def _show_bottom_panel(self, pane: str) -> None:
         self._restore_layout()

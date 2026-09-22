@@ -17,7 +17,7 @@ def set_windows_app_id() -> None:
     import ctypes
 
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-        "com.laurence.Lau-PyDE"
+        "com.laurence.Lau-PyDE"cd 
     )
 
 def main():

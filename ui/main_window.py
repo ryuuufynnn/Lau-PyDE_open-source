@@ -895,6 +895,11 @@ class MainWindow(QMainWindow):
             # self.statusBar().showMessage(f"Workspace: {folder}")
             self._current_folder = folder
             self.explorer.set_root_folder(folder)
+            # ensure the explorer is visible when a folder is opened
+            try:
+                self.explorer.show()
+            except Exception:
+                pass
             self.terminal_panel.set_working_directory(folder)
 
             RECENT_PROJECT_FILE.write_text(
@@ -955,6 +960,10 @@ class MainWindow(QMainWindow):
             if folder and Path(folder).is_dir():
                 self._current_folder = folder
                 self.explorer.set_root_folder(folder)
+                try:
+                    self.explorer.show()
+                except Exception:
+                    pass
 
                 file_path = data.get("file")
 
@@ -1259,21 +1268,29 @@ class MainWindow(QMainWindow):
         recs = list_recoveries()
         if not recs:
             return
+        # Group recoveries by their original path (use a sentinel for
+        # unsaved buffers) and handle each group once so we don't loop
+        # prompting the user for multiple recovery files that belong to
+        # the same original path.
+        groups: dict[str, list[dict]] = {}
+        for meta in recs:
+            orig = meta.get("original_path")
+            key = orig if orig is not None else "<unsaved>"
+            groups.setdefault(key, []).append(meta)
 
-        # Walk recoveries (newest first) and prompt only when the
-        # recovered content differs from the on-disk file (or the
-        # original path does not exist). If the file on disk already
-        # matches the recovered content, remove the recovery silently.
-        for latest in recs:
+        for group_key, metas in groups.items():
+            # pick the newest recovery in this group
+            metas.sort(key=lambda m: m.get("timestamp", 0), reverse=True)
+            latest = metas[0]
             key = latest.get("key")
             try:
                 orig_path, content = read_recovery(key)
             except Exception:
                 orig_path, content = None, ""
 
-            # If recovery points to an original file that exists on disk,
-            # compare contents. If identical, discard this recovery and
-            # continue to the next one.
+            # If this group maps to an on-disk file, and the file already
+            # matches the recovered content, remove all recoveries for
+            # the path and skip prompting.
             if orig_path:
                 try:
                     if Path(orig_path).is_file():
@@ -1284,18 +1301,35 @@ class MainWindow(QMainWindow):
 
                         if on_disk is not None and on_disk == content:
                             try:
-                                # remove any stale recoveries for this path
                                 remove_recovery_for_path(orig_path)
                             except Exception:
                                 pass
                             continue
                 except Exception:
-                    # if any unexpected error, fall back to prompting
                     pass
 
-            # At this point we have a recovery that is either for an
-            # unsaved buffer or differs from the on-disk file; prompt the
-            # user to restore it.
+            # For unsaved groups, if any currently-open file matches the
+            # content, consider the recovery stale and remove it.
+            if orig_path is None:
+                try:
+                    if self._current_file_path and Path(self._current_file_path).is_file():
+                        try:
+                            current_on_disk = read_file(self._current_file_path)
+                        except Exception:
+                            current_on_disk = None
+
+                        if current_on_disk is not None and current_on_disk == content:
+                            # remove all unsaved recoveries
+                            try:
+                                for m in metas:
+                                    remove_recovery(m.get("key"))
+                            except Exception:
+                                pass
+                            continue
+                except Exception:
+                    pass
+
+            # Prompt the user for this group's latest recovery
             orig = orig_path or "Unsaved file"
             choice = QMessageBox.question(
                 self,
@@ -1305,31 +1339,44 @@ class MainWindow(QMainWindow):
             )
 
             if choice == QMessageBox.Yes:
+                # Restore content into the editor. If this recovery maps
+                # to a real file path, set the current file accordingly.
                 self.editor.setPlainText(content)
                 self._current_file_path = orig_path
-                self.editor.document().setModified(True)
+                # Mark modified only if the recovery differs from on-disk
+                if orig_path and Path(orig_path).is_file():
+                    try:
+                        on_disk = read_file(orig_path)
+                    except Exception:
+                        on_disk = None
+                    self.editor.document().setModified(on_disk is None or on_disk != content)
+                else:
+                    self.editor.document().setModified(True)
+
                 self._show_editor()
                 self.statusBar().showMessage("Recovered unsaved work")
+
+                # Remove all recoveries in this group so we don't prompt again
                 try:
                     if orig_path:
-                        # clear any other recoveries for this file
                         remove_recovery_for_path(orig_path)
                     else:
-                        remove_recovery(key)
+                        for m in metas:
+                            remove_recovery(m.get("key"))
                 except Exception:
                     pass
                 return
             else:
+                # User declined: remove all recoveries for this group
                 try:
                     if orig_path:
-                        # user declined: remove all recoveries for that path
                         remove_recovery_for_path(orig_path)
                     else:
-                        remove_recovery(key)
+                        for m in metas:
+                            remove_recovery(m.get("key"))
                 except Exception:
                     pass
 
-        # no recoveries required after scanning
         return
 
     def _show_bottom_panel(self, pane: str) -> None:

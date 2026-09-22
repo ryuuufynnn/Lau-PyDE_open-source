@@ -2,7 +2,7 @@ import ast
 import difflib
 import tokenize
 from io import StringIO
-from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt
+from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -11,8 +11,10 @@ from PySide6.QtGui import (
     QTextCharFormat,
     QTextFormat,
     QTextCursor,
+    QAction,
 )
-from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
+from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget, QMenu, QCompleter
+from PySide6.QtCore import QStringListModel
 
 PYTHON_KEYWORDS = [
     "False", "None", "True", "and", "as", "assert", "async", "await",
@@ -28,6 +30,17 @@ PYTHON_BUILTINS = [
     "enumerate", "zip", "map", "filter", "sorted", "sum", "min", "max",
     "abs", "super", "self",
 ]
+
+# Small, static attribute lists for common modules to provide attribute completions
+MODULE_ATTRS = {
+    "os": [
+        "listdir", "path", "getcwd", "chdir", "mkdir", "makedirs", "remove", "rename",
+    ],
+    "sys": ["argv", "exit", "path", "stdin", "stdout", "stderr"],
+    "math": ["sqrt", "sin", "cos", "tan", "pi", "e"],
+    "json": ["load", "loads", "dump", "dumps"],
+    "pathlib": ["Path", "PurePath"],
+}
 
 
 class PythonHighlighter(QSyntaxHighlighter):
@@ -127,6 +140,8 @@ class LineNumberArea(QWidget):
 
 
 class CodeEditor(QPlainTextEdit):
+    # notify listeners when diagnostics/count changes: emits int (total issues)
+    diagnostics_changed = Signal(int)
     """
     The main code-editing widget.
 
@@ -169,6 +184,20 @@ class CodeEditor(QPlainTextEdit):
         self._highlight_current_line()
 
         self._highlighter = PythonHighlighter(self.document())
+        # connect textChanged after setting up completion model to avoid
+        # running _check_errors before instance attributes are initialized
+
+        # track last emitted diagnostics count to avoid noisy emissions
+        self._last_diag_count = -1
+
+        # lightweight completion: keywords, builtins, and user-defined names
+        self._completion_model = QStringListModel()
+        self._completer = QCompleter(self._completion_model, self)
+        self._completer.setWidget(self)
+        self._completer.setCompletionMode(QCompleter.PopupCompletion)
+        self._completer.setCaseSensitivity(Qt.CaseInsensitive)
+
+        # now safe to connect textChanged
         self.textChanged.connect(self._check_errors)
 
     def get_error_messages(self) -> list[str]:
@@ -250,6 +279,7 @@ class CodeEditor(QPlainTextEdit):
         """Collect names that are actually defined in the code so we do not
         flag valid variables as misspellings or undefined names."""
         defined: set[str] = set()
+        imports: set[str] = set()
 
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -260,9 +290,53 @@ class CodeEditor(QPlainTextEdit):
                 defined.add(node.id)
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in node.names:
-                    defined.add(alias.asname or alias.name.split(".")[0])
+                    name = alias.asname or alias.name.split(".")[0]
+                    defined.add(name)
+                    imports.add(name)
 
-        return defined
+        return defined, imports
+
+    def _get_enclosing_scope_names(self, tree: ast.AST, cursor_line: int) -> set[str]:
+        """Return names defined in the smallest enclosing function/class for cursor_line.
+
+        Falls back to empty set when no enclosing scope found.
+        """
+        candidates = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                start = getattr(node, 'lineno', None)
+                end = getattr(node, 'end_lineno', None)
+                if start is None:
+                    continue
+                if end is None:
+                    # approximate end_lineno by scanning child nodes
+                    end = start
+                    for sub in ast.walk(node):
+                        if hasattr(sub, 'lineno'):
+                            end = max(end, getattr(sub, 'lineno'))
+
+                if start <= cursor_line <= end:
+                    # collect names defined directly under this node
+                    names = set()
+                    for sub in ast.walk(node):
+                        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                            names.add(sub.name)
+                        elif isinstance(sub, ast.arg):
+                            names.add(sub.arg)
+                        elif isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
+                            names.add(sub.id)
+                        elif isinstance(sub, (ast.Import, ast.ImportFrom)):
+                            for alias in sub.names:
+                                names.add(alias.asname or alias.name.split('.')[0])
+                    candidates.append((start, end, names))
+
+        if not candidates:
+            return set()
+
+        # choose the smallest enclosing scope (shortest range)
+        candidates.sort(key=lambda t: (t[1] - t[0], t[0]))
+        return candidates[0][2]
 
     def _check_errors(self) -> None:
         code = self.toPlainText()
@@ -340,7 +414,67 @@ class CodeEditor(QPlainTextEdit):
 
         try:
             tree = ast.parse(code)
-            defined_names = self._collect_defined_names(tree)
+            defined_names, imports = self._collect_defined_names(tree)
+            # find enclosing scope names for the cursor (if available)
+            cursor = self.textCursor()
+            cursor_line = cursor.blockNumber() + 1
+            scope_names = self._get_enclosing_scope_names(tree, cursor_line)
+            # Build a ranked completion list:
+            # 1) defined names (most frequent first), 2) builtins (used first),
+            # 3) remaining builtins, 4) keywords.
+            try:
+                from collections import Counter
+
+                name_counts = Counter()
+                try:
+                    toks = list(tokenize.generate_tokens(StringIO(code).readline))
+                except Exception:
+                    toks = []
+
+                for t in toks:
+                    if t.type == tokenize.NAME:
+                        name_counts[t.string] += 1
+
+                # defined names sorted by whether they're in scope, then frequency then name
+                def defined_key(n):
+                    in_scope = 0 if n in scope_names else 1
+                    return (in_scope, -name_counts.get(n, 0), n)
+
+                defined_sorted = sorted(defined_names, key=defined_key)
+
+                # builtins seen in the file first (by frequency), then remaining builtins
+                builtin_seen = [b for b in PYTHON_BUILTINS if name_counts.get(b, 0) > 0]
+                builtin_seen.sort(key=lambda b: -name_counts.get(b, 0))
+                builtin_remaining = [b for b in PYTHON_BUILTINS if b not in builtin_seen]
+
+                # keywords: include all but keep them low-priority
+                keywords_sorted = sorted(PYTHON_KEYWORDS)
+
+                suggestion_list = []
+                suggestion_list.extend(defined_sorted)
+                suggestion_list.extend(builtin_seen)
+                suggestion_list.extend(builtin_remaining)
+                suggestion_list.extend(keywords_sorted)
+
+                # deduplicate while preserving order
+                seen = set()
+                final_list = []
+                for s in suggestion_list:
+                    if s in seen:
+                        continue
+                    seen.add(s)
+                    final_list.append(s)
+
+                # keep the suggestion list compact
+                MAX_SUGGESTIONS = 60
+                self._completion_model.setStringList(final_list[:MAX_SUGGESTIONS])
+            except Exception:
+                # fall back to a simple combined list if anything goes wrong
+                try:
+                    completions = set(PYTHON_KEYWORDS + PYTHON_BUILTINS) | set(defined_names)
+                    self._completion_model.setStringList(sorted(completions))
+                except Exception:
+                    pass
         except SyntaxError as error:
             if error.lineno is not None and error.offset is not None:
                 start = error.offset
@@ -433,6 +567,81 @@ class CodeEditor(QPlainTextEdit):
                     seen_name.add(item)
         self._highlight_current_line()
         self._line_number_area.update()
+        # compute diagnostics count and emit signal if changed
+        try:
+            diag_count = len(self._syntax_errors) + len(self._keyword_errors) + len(self._name_errors)
+            if diag_count != self._last_diag_count:
+                self._last_diag_count = diag_count
+                try:
+                    self.diagnostics_changed.emit(diag_count)
+                except Exception:
+                    # be resilient if no listeners or signal unavailable
+                    pass
+        except Exception:
+            pass
+
+    def _word_under_cursor(self) -> str:
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.WordUnderCursor)
+        return cursor.selectedText()
+
+    def keyPressEvent(self, event) -> None:
+        # allow auto-indent/backspace handling
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self._handle_auto_indent()
+            return
+
+        if event.key() == Qt.Key_Backspace:
+            if self._handle_backspace():
+                return
+
+        # Ctrl+Space to manually trigger completion
+        if event.key() == Qt.Key_Space and event.modifiers() & Qt.ControlModifier:
+            prefix = self._word_under_cursor()
+            try:
+                self._completer.setCompletionPrefix(prefix)
+                self._completer.complete()
+            except Exception:
+                pass
+            return
+
+        # If user typed a dot, provide attribute completions for imported modules
+        if event.text() == '.':
+            try:
+                # find token before dot
+                cursor = self.textCursor()
+                cursor.movePosition(QTextCursor.Left)
+                cursor.select(QTextCursor.WordUnderCursor)
+                obj = cursor.selectedText()
+                attrs = []
+                if obj in MODULE_ATTRS:
+                    attrs = MODULE_ATTRS[obj]
+                elif hasattr(self, '_imports') and obj in self._imports:
+                    # prefer module attrs if we imported that module
+                    attrs = MODULE_ATTRS.get(obj, [])
+
+                if attrs:
+                    self._completion_model.setStringList(sorted(attrs))
+                    self._completer.setCompletionPrefix('')
+                    self._completer.complete()
+            except Exception:
+                pass
+            # still insert the dot
+            super().keyPressEvent(event)
+            return
+
+        super().keyPressEvent(event)
+
+        # after inserting a character, if it's part of an identifier, show completions
+        last = event.text()
+        if last and (last.isalpha() or last == "_" or last.isdigit()):
+            prefix = self._word_under_cursor()
+            if prefix:
+                try:
+                    self._completer.setCompletionPrefix(prefix)
+                    self._completer.complete()
+                except Exception:
+                    pass
 
     # line number gutter
     def line_number_area_width(self) -> int:
@@ -597,6 +806,52 @@ class CodeEditor(QPlainTextEdit):
                 return
         
         super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        """Show a lightweight context (right-click) menu with common actions."""
+        menu = QMenu(self)
+
+        undo = QAction("Undo", self)
+        undo.triggered.connect(self.undo)
+        menu.addAction(undo)
+
+        redo = QAction("Redo", self)
+        redo.triggered.connect(self.redo)
+        menu.addAction(redo)
+
+        menu.addSeparator()
+
+        cut = QAction("Cut", self)
+        cut.triggered.connect(self.cut)
+        menu.addAction(cut)
+
+        copy = QAction("Copy", self)
+        copy.triggered.connect(self.copy)
+        menu.addAction(copy)
+
+        paste = QAction("Paste", self)
+        paste.triggered.connect(self.paste)
+        menu.addAction(paste)
+
+        menu.addSeparator()
+
+        select_all = QAction("Select All", self)
+        select_all.triggered.connect(self.selectAll)
+        menu.addAction(select_all)
+
+        find = QAction("Find", self)
+        def _open_find():
+            w = self.window()
+            if hasattr(w, "_open_search"):
+                try:
+                    w._open_search()
+                except Exception:
+                    pass
+
+        find.triggered.connect(_open_find)
+        menu.addAction(find)
+
+        menu.exec(event.globalPos())
 
     def _handle_backspace(self) -> bool:
         cursor = self.textCursor()
