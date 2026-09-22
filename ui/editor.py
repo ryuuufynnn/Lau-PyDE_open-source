@@ -2,7 +2,7 @@ import ast
 import difflib
 import tokenize
 from io import StringIO
-from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt
+from PySide6.QtCore import QRect, QRegularExpression, QSize, Qt, Signal, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -127,6 +127,7 @@ class LineNumberArea(QWidget):
 
 
 class CodeEditor(QPlainTextEdit):
+    diagnostics_changed = Signal(int)
     """
     The main code-editing widget.
 
@@ -169,7 +170,28 @@ class CodeEditor(QPlainTextEdit):
         self._highlight_current_line()
 
         self._highlighter = PythonHighlighter(self.document())
-        self.textChanged.connect(self._check_errors)
+
+        # diagnostics debounce: do not recalc on every keystroke
+        self._diagnostic_timer = QTimer(self)
+        self._diagnostic_timer.setInterval(600)
+        self._diagnostic_timer.setSingleShot(True)
+        self._diagnostic_timer.timeout.connect(self._on_diagnostic_timer)
+        self.textChanged.connect(lambda: self._diagnostic_timer.start())
+
+    def _on_diagnostic_timer(self) -> None:
+        """Called after the debounce timer fires to recalculate diagnostics
+        and notify listeners with the new issue count."""
+        try:
+            self._check_errors()
+            count = len(self.get_error_messages())
+            try:
+                self.diagnostics_changed.emit(count)
+            except Exception:
+                # in case nobody is connected
+                pass
+        except Exception:
+            # Don't let diagnostics crash the editor
+            pass
 
     def get_error_messages(self) -> list[str]:
         """Return human-readable error messages for all current issues."""
@@ -482,7 +504,17 @@ class CodeEditor(QPlainTextEdit):
 
     def _highlight_current_line(self) -> None:
         """Highlight the current line and any syntax error."""
+        selections = self._build_base_extra_selections()
+        self.setExtraSelections(selections)
+        self._line_number_area.update()
 
+    def _build_base_extra_selections(self) -> list:
+        """Build and return the list of ExtraSelection objects used for
+        the base editor UI (current line highlight and diagnostics).
+        This does not modify the editor state; callers may merge their
+        own selections with the returned list before calling
+        `setExtraSelections`.
+        """
         selections = []
 
         # current line
@@ -583,8 +615,7 @@ class CodeEditor(QPlainTextEdit):
             error_selection.cursor = cursor
             selections.append(error_selection)
 
-        self.setExtraSelections(selections)
-        self._line_number_area.update()
+        return selections
 
     # auto indentation
     def keyPressEvent(self, event) -> None:
