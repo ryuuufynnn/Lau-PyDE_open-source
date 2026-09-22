@@ -31,6 +31,17 @@ PYTHON_BUILTINS = [
     "abs", "super", "self",
 ]
 
+# Small, static attribute lists for common modules to provide attribute completions
+MODULE_ATTRS = {
+    "os": [
+        "listdir", "path", "getcwd", "chdir", "mkdir", "makedirs", "remove", "rename",
+    ],
+    "sys": ["argv", "exit", "path", "stdin", "stdout", "stderr"],
+    "math": ["sqrt", "sin", "cos", "tan", "pi", "e"],
+    "json": ["load", "loads", "dump", "dumps"],
+    "pathlib": ["Path", "PurePath"],
+}
+
 
 class PythonHighlighter(QSyntaxHighlighter):
     """
@@ -571,6 +582,31 @@ class CodeEditor(QPlainTextEdit):
                 self._completer.complete()
             except Exception:
                 pass
+            return
+
+        # If user typed a dot, provide attribute completions for imported modules
+        if event.text() == '.':
+            try:
+                # find token before dot
+                cursor = self.textCursor()
+                cursor.movePosition(QTextCursor.Left)
+                cursor.select(QTextCursor.WordUnderCursor)
+                obj = cursor.selectedText()
+                attrs = []
+                if obj in MODULE_ATTRS:
+                    attrs = MODULE_ATTRS[obj]
+                elif hasattr(self, '_imports') and obj in self._imports:
+                    # prefer module attrs if we imported that module
+                    attrs = MODULE_ATTRS.get(obj, [])
+
+                if attrs:
+                    self._completion_model.setStringList(sorted(attrs))
+                    self._completer.setCompletionPrefix('')
+                    self._completer.complete()
+            except Exception:
+                pass
+            # still insert the dot
+            super().keyPressEvent(event)
             return
 
         super().keyPressEvent(event)
