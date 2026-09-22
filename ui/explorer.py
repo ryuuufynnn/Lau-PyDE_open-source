@@ -11,7 +11,7 @@ and nothing outside the opened folder is ever touched.
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal, Qt, QModelIndex
+from PySide6.QtCore import Signal, Qt, QModelIndex, QDir
 from PySide6.QtGui import QColor, QPainter 
 from PySide6.QtWidgets import (
     QFileSystemModel,
@@ -86,7 +86,11 @@ class FileExplorer(QWidget):
 
         self._model = QFileSystemModel()
         self._model.setNameFilters(["*.py", "*.txt", "*.md", "*.json", "*.cfg", "*.toml"])
-        self._model.setNameFilterDisables(False)  # hide non-matching files entirely
+        # Keep folders visible while filtering file names so the user can
+        # browse the full directory hierarchy (expand/collapse folders).
+        self._model.setNameFilterDisables(True)
+        # Show directories and files; hide '.' and '..'
+        self._model.setFilter(QDir.NoDotAndDotDot | QDir.AllDirs | QDir.Files)
 
         self._error_counts = {}
 
