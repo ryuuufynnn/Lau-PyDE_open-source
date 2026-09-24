@@ -102,6 +102,7 @@ class FileExplorer(QWidget):
         self._model.setFilter(QDir.NoDotAndDotDot | QDir.AllDirs | QDir.Files)
 
         self._error_counts = {}
+        self._project_root = None
 
         self._tree = QTreeView()
         self._tree.setModel(self._model)
@@ -158,6 +159,7 @@ class FileExplorer(QWidget):
 
     def set_root_folder(self, folder_path: str | None) -> None:
         """Point the explorer at a new project folder."""
+        self._project_root = str(Path(folder_path)) if folder_path else None
         # if no folder is open, hide the tree
         if not folder_path:
             # unhide any previously hidden rows
@@ -237,30 +239,63 @@ class FileExplorer(QWidget):
             self.file_double_clicked.emit(path)
 
     def reveal_path(self, file_path: str) -> None:
-        """Ensure the file's folder is the explorer root and select the file."""
+        """Ensure the file is selected without collapsing the current project tree."""
         p = Path(file_path)
         if not p.exists():
             return
 
+        root_folder = self._project_root
+        project_root = Path(root_folder) if root_folder else None
+
+        # Keep the active project root stable when a file inside that project is
+        # opened. Resetting to the file's parent folder is what collapses the
+        # visible hierarchy and hides the parent folders from the user.
+        if project_root and p.is_relative_to(project_root):
+            idx = self._model.index(str(p))
+            if not idx.isValid():
+                parent_idx = self._model.index(str(p.parent))
+                if parent_idx.isValid():
+                    name = p.name
+                    for row in range(self._model.rowCount(parent_idx)):
+                        child = self._model.index(row, 0, parent_idx)
+                        if self._model.fileName(child) == name:
+                            idx = child
+                            break
+
+            if idx.isValid():
+                parent = idx.parent()
+                parents = []
+                while parent.isValid():
+                    parents.append(parent)
+                    parent = parent.parent()
+
+                for pidx in reversed(parents):
+                    try:
+                        self._tree.expand(pidx)
+                    except Exception:
+                        pass
+
+                self._tree.setCurrentIndex(idx)
+                self._tree.scrollTo(idx)
+            return
+
+        # Only fall back to the file's parent when the selected file is outside
+        # the currently opened project; keep the same folder-root pattern used in
+        # `set_root_folder` for that case.
         folder = str(p.parent)
-        # Reset the model root to the file's parent so it is visible
         try:
             root_index = self._model.setRootPath(folder)
             self._tree.setRootIndex(root_index)
         except Exception:
-            # fallback to the helper which also hides/shows the tree
             try:
                 self.set_root_folder(folder)
             except Exception:
                 pass
 
-        # find the index for the file and select it
         idx = self._model.index(str(p))
         if not idx.isValid():
-            # sometimes index creation depends on the view root; try using the parent index
             parent_idx = self._model.index(folder)
             if parent_idx.isValid():
-                # look for a matching child by name
                 name = p.name
                 for row in range(self._model.rowCount(parent_idx)):
                     child = self._model.index(row, 0, parent_idx)
@@ -269,7 +304,6 @@ class FileExplorer(QWidget):
                         break
 
         if idx.isValid():
-            # expand parent chain so the item is visible
             parent = idx.parent()
             parents = []
             while parent.isValid():
