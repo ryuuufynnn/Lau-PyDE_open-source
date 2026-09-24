@@ -595,6 +595,21 @@ class CodeEditor(QPlainTextEdit):
             if self._handle_backspace():
                 return
 
+        # handle Tab to insert spaces up to the next indent stop
+        if event.key() == Qt.Key_Tab:
+            cursor = self.textCursor()
+            if cursor.hasSelection():
+                # fallback to default behavior for selections
+                super().keyPressEvent(event)
+                return
+
+            position = cursor.positionInBlock()
+            indent_size = 4
+            to_insert = indent_size - (position % indent_size) if indent_size else 1
+            cursor.insertText(" " * to_insert)
+            self.setTextCursor(cursor)
+            return
+
         # Ctrl+Space to manually trigger completion
         if event.key() == Qt.Key_Space and event.modifiers() & Qt.ControlModifier:
             prefix = self._word_under_cursor()
@@ -871,14 +886,25 @@ class CodeEditor(QPlainTextEdit):
         if not before_cursor.isspace():
             return False
 
-        spaces = 3
+        # compute how many spaces to remove to go back to previous
+        # indentation stop (e.g., 4 spaces). Only remove actual space
+        # characters that are present immediately before the cursor so
+        # we do not delete characters from the previous line.
+        indent_size = 4
+        try:
+            rem = position % indent_size
+            to_remove = rem if rem != 0 else indent_size
+        except Exception:
+            to_remove = 1
 
-        # remove up to one indentation level.
-        remove_count = min(position, spaces)
+        # limit to available trailing spaces in the current block
+        trailing_spaces = len(before_cursor) - len(before_cursor.rstrip(" "))
+        if trailing_spaces == 0:
+            return False
 
-        cursor.deletePreviousChar()
+        to_remove = min(to_remove, trailing_spaces)
 
-        for _ in range(remove_count):
+        for _ in range(to_remove):
             cursor.deletePreviousChar()
 
         self.setTextCursor(cursor)
@@ -893,14 +919,30 @@ class CodeEditor(QPlainTextEdit):
         This is intentionally simple — it looks only at the current
         line's text, not the whole file's structure, on purpose.
         """
+        import re
+
         cursor = self.textCursor()
-        current_line = cursor.block().text()
+        current_block = cursor.block()
+        current_line = current_block.text()
 
-        stripped = current_line.lstrip(" ")
-        indent = current_line[: len(current_line) - len(stripped)]
+        # if the current line is empty or only whitespace, try to base the
+        # indentation on the previous non-empty line so pressing Enter on a
+        # blank indented line keeps the expected nested indentation.
+        if not current_line.strip():
+            prev = current_block.previous()
+            while prev.isValid() and not prev.text().strip():
+                prev = prev.previous()
+            base_line = prev.text() if prev.isValid() else ""
+        else:
+            base_line = current_line
 
-        if stripped.rstrip().endswith(":"):
-            indent += "    "
+        m = re.match(r"^(\s*)", base_line)
+        base_indent = m.group(1) if m else ""
 
-        cursor.insertText("\n" + indent)
+        # if the (base) line ends with a colon, add one indent level
+        extra = "    " if base_line.rstrip().endswith(":") else ""
+
+        new_indent = base_indent + extra
+
+        cursor.insertText("\n" + new_indent)
         self.setTextCursor(cursor)
