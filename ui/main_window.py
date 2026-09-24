@@ -299,6 +299,17 @@ class MainWindow(QMainWindow):
         self.explorer.minimize_requested.connect(self._minimize_explorer)
         self.explorer.maximize_requested.connect(lambda: self._maximize_pane("explorer"))
 
+        # populate explorer commands list from available actions
+        try:
+            # gather actionable shortcuts from the menu actions that are enabled
+            actions = [
+                ("New File", self.findChild(QAction, "")),
+            ]
+        except Exception:
+            actions = []
+
+        # populate_commands will be called after menus are built
+
         self._runner = PythonRunner()
         self._runner.output_ready.connect(self._append_output)
         self._runner.finished.connect(self._on_run_finished)
@@ -625,6 +636,28 @@ class MainWindow(QMainWindow):
         show_terminal_action.triggered.connect(lambda: self._show_bottom_panel("terminal"))
         view_menu.addAction(show_terminal_action)
 
+        # action to show/hide commands list in explorer
+        show_commands_list_action = QAction("Show Commands List", self)
+        show_commands_list_action.setCheckable(True)
+        show_commands_list_action.setChecked(self.explorer._commands_section.isVisible())
+
+        # when the menu action is toggled, use the explorer's toggle method
+        def _menu_toggle_commands(checked: bool) -> None:
+            try:
+                self.explorer._toggle_commands_section()
+            except Exception:
+                pass
+
+        show_commands_list_action.triggered.connect(_menu_toggle_commands)
+
+        # keep action in sync when explorer toggles it using the header button
+        try:
+            self.explorer.commands_visibility_changed.connect(lambda visible: show_commands_list_action.setChecked(visible))
+        except Exception:
+            pass
+
+        view_menu.addAction(show_commands_list_action)
+
         restore_layout_action = QAction("Restore Layout", self)
         restore_layout_action.triggered.connect(self._restore_layout)
         restore_layout_action.setShortcut(QKeySequence("Ctrl+0"))
@@ -665,6 +698,13 @@ class MainWindow(QMainWindow):
         update_action.setShortcut(QKeySequence("Ctrl+U"))
         update_action.triggered.connect(self._update_lau_pyde)
         help_menu.addAction(update_action)
+
+        # populate explorer commands now that menus/actions exist
+        try:
+            if hasattr(self.explorer, 'populate_commands'):
+                self.explorer.populate_commands(self)
+        except Exception:
+            pass
 
     # file operations
     def _project_root(self) -> Path:
@@ -976,7 +1016,30 @@ class MainWindow(QMainWindow):
 
             if folder and Path(folder).is_dir():
                 self._current_folder = folder
+                # restore the exact folder as the explorer root and ensure
+                # the explorer shows the project's commands section.
                 self.explorer.set_root_folder(folder)
+                try:
+                    # prefer showing the project folder itself as the tree root
+                    idx = self.explorer._model.index(str(folder))
+                    if idx.isValid():
+                        self.explorer._tree.setRootIndex(idx)
+                        try:
+                            self.explorer._tree.expand(idx)
+                            self.explorer._tree.setCurrentIndex(idx)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                try:
+                    # ensure commands section is visible and layout is restored
+                    try:
+                        self.explorer._commands_section.show()
+                        self.explorer._commands_section.setMaximumHeight(16777215)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
                 try:
                     self.explorer.show()
                 except Exception:
@@ -1509,5 +1572,12 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self._runner.stop()
+
+        # persist current project folder so it is restored on next launch
+        try:
+            if self._current_folder:
+                RECENT_PROJECT_FILE.write_text(json.dumps({"project": self._current_folder}))
+        except Exception:
+            pass
 
         event.accept()
