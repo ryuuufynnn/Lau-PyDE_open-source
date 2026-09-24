@@ -14,6 +14,7 @@ import os
 import sys
 import shutil
 import subprocess
+import typing
 
 from PySide6.QtCore import Signal, Qt, QModelIndex, QDir, QUrl
 from PySide6.QtGui import QColor, QPainter, QAction
@@ -159,7 +160,12 @@ class FileExplorer(QWidget):
 
     def set_root_folder(self, folder_path: str | None) -> None:
         """Point the explorer at a new project folder."""
-        self._project_root = str(Path(folder_path)) if folder_path else None
+        # store a normalized project root to make comparisons robust
+        try:
+            self._project_root = str(Path(folder_path).resolve()) if folder_path else None
+        except Exception:
+            # fallback to the raw string when resolve fails
+            self._project_root = str(Path(folder_path)) if folder_path else None
         # if no folder is open, hide the tree
         if not folder_path:
             # unhide any previously hidden rows
@@ -190,10 +196,21 @@ class FileExplorer(QWidget):
                 self._tree.setRootIndex(parent_idx)
 
                 # hide all rows except the chosen folder
+                # compare paths using resolution and case-normalization so
+                # Windows path variants (case/different separators) do not
+                # cause the chosen folder to be hidden by accident.
+                def _norm_path(x: str) -> str:
+                    try:
+                        return str(Path(x).resolve())
+                    except Exception:
+                        return os.path.normcase(os.path.normpath(str(x)))
+
+                target_norm = _norm_path(p)
                 for row in range(self._model.rowCount(parent_idx)):
                     child = self._model.index(row, 0, parent_idx)
                     child_path = self._model.filePath(child)
-                    hide = child_path != str(p)
+                    child_norm = _norm_path(child_path)
+                    hide = child_norm != target_norm
                     try:
                         self._tree.setRowHidden(row, parent_idx, hide)
                     except Exception:
