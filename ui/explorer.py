@@ -378,8 +378,14 @@ class FileExplorer(QWidget):
         except OSError as e:
             QMessageBox.critical(self, 'Error', f'Could not create file:\n{e}')
             return
-        # refresh
-        self._model.directoryLoaded.emit(str(folder_path))
+        # refresh model for the folder so the new file appears
+        try:
+            self._model.setRootPath(str(folder_path))
+        except Exception:
+            try:
+                self._model.directoryLoaded.emit(str(folder_path))
+            except Exception:
+                pass
 
     def _create_folder(self, folder_path: str) -> None:
         name, ok = QInputDialog.getText(self, 'New Folder', 'Folder name:')
@@ -391,7 +397,13 @@ class FileExplorer(QWidget):
         except OSError as e:
             QMessageBox.critical(self, 'Error', f'Could not create folder:\n{e}')
             return
-        self._model.directoryLoaded.emit(str(folder_path))
+        try:
+            self._model.setRootPath(str(folder_path))
+        except Exception:
+            try:
+                self._model.directoryLoaded.emit(str(folder_path))
+            except Exception:
+                pass
 
     def _rename(self, path: str) -> None:
         p = Path(path)
@@ -405,7 +417,13 @@ class FileExplorer(QWidget):
             QMessageBox.critical(self, 'Error', f'Could not rename:\n{e}')
             return
         parent = str(p.parent)
-        self._model.directoryLoaded.emit(parent)
+        try:
+            self._model.setRootPath(parent)
+        except Exception:
+            try:
+                self._model.directoryLoaded.emit(parent)
+            except Exception:
+                pass
 
     def _delete(self, path: str) -> None:
         p = Path(path)
@@ -420,7 +438,13 @@ class FileExplorer(QWidget):
         except OSError as e:
             QMessageBox.critical(self, 'Error', f'Could not delete:\n{e}')
             return
-        self._model.directoryLoaded.emit(str(p.parent))
+        try:
+            self._model.setRootPath(str(p.parent))
+        except Exception:
+            try:
+                self._model.directoryLoaded.emit(str(p.parent))
+            except Exception:
+                pass
 
     def _copy_path(self, path: str) -> None:
         clipboard = QApplication.clipboard()
